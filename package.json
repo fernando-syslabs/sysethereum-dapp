@@ -25,6 +25,9 @@
     "syscoinjs-lib": "^1.0.228",
     "web3": "^1.7.5"
   },
+  "overrides": {
+    "merkle-patricia-tree": "2.3.2"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
