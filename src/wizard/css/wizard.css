@@ -518,6 +518,13 @@ ol.progtrckr li.progtrckr-done:hover:before {
   color: #fff;
 }
 
+.val-warn-tooltip {
+  background-color: #37435f;
+  padding: 3px 5px 3px 10px;
+  font-size: 14px;
+  color: #fff;
+}
+
 @media (max-width: 835px) {
   .wizardTitleCont {
     margin-top: 105px;

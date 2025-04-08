@@ -1,6 +1,8 @@
 import React, { Component } from "react";
+import Web3 from "web3";
 import CONFIGURATION from "../config";
 const sjs = require("syscoinjs-lib");
+const web3 = new Web3(Web3.givenProvider || CONFIGURATION.Web3URL); // Fallback to config URL
 
 class Step2ES extends Component {
   constructor(props) {
@@ -13,12 +15,16 @@ class Step2ES extends Component {
       ethburntxid:
         (storageExists && localStorage.getItem("receiptTxHash")) ||
         this.props.getStore().receiptTxHash,
-      working: false,
+      working: true,
+      ethburntxidVal: true, // Assume valid initially for styling
+      ethburntxidValMsg: "", // Will be set in componentDidMount
+      pollIntervalId: null, // To store interval ID for cleanup
     };
     this._validateOnDemand = true; // this flag enables onBlur validation as user fills forms
     this.getMintTx = this.getMintTx.bind(this);
     this.validationCheck = this.validationCheck.bind(this);
     this.isValidated = this.isValidated.bind(this);
+    this.checkEthTxStatus = this.checkEthTxStatus.bind(this);
     this.syscoinjs = new sjs.SyscoinJSLib(
       null,
       CONFIGURATION.BlockbookAPIURL,
@@ -34,8 +40,49 @@ class Step2ES extends Component {
       // Sorry! No Web Storage support..
     }
   }
-  componentDidMount() {}
-  componentWillUnmount() {}
+  componentDidMount() {
+    if (this.state.ethburntxid) {
+      this.setState({ ethburntxidValMsg: this.props.t("step3PleaseWait") });
+      this.checkEthTxStatus(); // Start check immediately
+      const intervalId = setInterval(this.checkEthTxStatus, 15*1000); // Poll every 15 seconds
+      this.setState({ pollIntervalId: intervalId });
+    } else {
+      // No txid? Set error message
+      this.setState({ working: false, ethburntxidVal: false, ethburntxidValMsg: this.props.t("step2ESTxid") });
+    }
+  }
+  componentWillUnmount() {
+    if (this.state.pollIntervalId) {
+      clearInterval(this.state.pollIntervalId);
+    }
+  }
+
+  async checkEthTxStatus() {
+    if (!this.state.ethburntxid) return; // Should not happen if polling started
+
+    try {
+      const receipt = await web3.eth.getTransactionReceipt(this.state.ethburntxid);
+      if (receipt && receipt.blockNumber) {
+         // Receipt exists
+         clearInterval(this.state.pollIntervalId);
+         this.setState({ pollIntervalId: null });
+
+         const isSuccess = receipt.status === true || receipt.status === '0x1' || receipt.status === 1;
+         if (isSuccess) {
+           this.setState({ working: false, ethburntxidValMsg: "" });
+           console.log(`Tx ${this.state.ethburntxid} confirmed successfully.`);
+         } else {
+           // FAILED
+           this.setState({ working: true, ethburntxidVal: false, ethburntxidValMsg: this.props.t("step3ErrorEVMCheckLog") || "Transaction failed!" });
+           console.error(`Tx ${this.state.ethburntxid} confirmed but failed.`);
+         }
+      }
+    } catch (error) {
+      console.error("Error checking ETH tx status:", error);
+      // Optional: Show temporary RPC error, but keep polling for now
+      this.setState({ ethburntxidValMsg: this.props.t("step3PleaseWait") + " (RPC Error)"});
+    }
+  }
 
   isValidated() {
     const userInput = this._grabUserInput(); // grab user entered vals
@@ -281,10 +328,7 @@ class Step2ES extends Component {
 
   _validationErrors(val) {
     const errMsgs = {
-      ethburntxidValMsg:
-        val.ethburntxidVal && val.ethburntxidVal === true
-          ? ""
-          : this.props.t("step2ESTxid"),
+      ethburntxidValMsg: this.state.ethburntxidValMsg, // Use state message
       minttxidValMsg: val.minttxidVal ? "" : this.props.t("step2RawTx"),
     };
     return errMsgs;
@@ -301,11 +345,9 @@ class Step2ES extends Component {
     // explicit class assigning based on validation
     let notValidClasses = {};
 
-    if (
-      typeof this.state.ethburntxidVal == "undefined" ||
-      this.state.ethburntxidVal
-    ) {
+    if (this.state.ethburntxidVal) {
       notValidClasses.ethburntxidCls = "no-error";
+      notValidClasses.ethburntxidValGrpCls = this.state.ethburntxidValMsg ? "val-warn-tooltip" : "val-success-tooltip"; // Show warn style for "Please wait"
     } else {
       notValidClasses.ethburntxidCls = "has-error";
       notValidClasses.ethburntxidValGrpCls = "val-err-tooltip";

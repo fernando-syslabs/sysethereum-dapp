@@ -816,7 +816,7 @@ class SysethereumDApp extends Component {
             <div className="wizardTitle">
               <span className="ethl">NEVM</span>
               <span className="direction">➜</span>
-              <span className="sysr">SYS</span>
+              <span className="sysr">SYSX</span>
             </div>
           </div>
 

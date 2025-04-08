@@ -1,7 +1,5 @@
 import React, { Component } from "react";
 import Web3 from "web3";
-import { Tab, Tabs, TabList, TabPanel } from "react-tabs";
-import "react-tabs/style/react-tabs.css";
 import assetabierc20 from "../SyscoinERC20I";
 import assetabierc721 from "../SyscoinERC721I";
 import assetabierc1155 from "../SyscoinERC1155I";
@@ -34,23 +32,13 @@ class Step1ES extends Component {
       receiptTxHash:
         (storageExists && localStorage.getItem("receiptTxHash")) ||
         props.getStore().receiptTxHash,
-      receiptTxIndex: props.getStore().receiptTxIndex,
-      receiptFrom: props.getStore().receiptFrom,
-      receiptTo: props.getStore().receiptTo,
-      receiptBlockhash: props.getStore().receiptBlockhash,
-      receiptBlocknumber: props.getStore().receiptBlocknumber,
-      receiptTotalGas: props.getStore().receiptTotalGas,
-      receiptGas: props.getStore().receiptGas,
-      receiptObj: props.getStore().receiptObj,
       working: false,
       assetType: 'SYS',
       tokenId: '',
     };
     this.submitProofs = this.submitProofs.bind(this);
-    this.downloadReceipt = this.downloadReceipt.bind(this);
     this.validationCheck = this.validationCheck.bind(this);
     this.isValidated = this.isValidated.bind(this);
-    this.setStateFromReceipt = this.setStateFromReceipt.bind(this);
   }
   componentDidMount() {}
   isValidated() {
@@ -93,17 +81,6 @@ class Step1ES extends Component {
     return isDataValid;
   }
   componentWillUnmount() {}
-  downloadReceipt() {
-    const element = document.createElement("a");
-    const file = new Blob(
-      [JSON.stringify(this.state.receiptObj, null, "   ")],
-      { type: "text/plain" }
-    );
-    element.href = URL.createObjectURL(file);
-    element.download = "receipt.txt";
-    document.body.appendChild(element); // Required for this to work in FireFox
-    element.click();
-  }
   saveToLocalStorage() {
     if (typeof Storage !== "undefined") {
       // Code for localStorage/sessionStorage.
@@ -141,16 +118,6 @@ class Step1ES extends Component {
       tokenIdVal: true,
       toSysAmountVal: true,
       syscoinWitnessAddressVal: true,
-      receiptStatusVal: true,
-      receiptTxHashVal: true,
-      receiptTxIndexVal: true,
-      receiptFromVal: true,
-      receiptToVal: true,
-      receiptBlockhashVal: true,
-      receiptBlocknumberVal: true,
-      receiptTotalGasVal: true,
-      receiptGasVal: true,
-      receiptObjVal: true,
     };
   
     if ((this.state.assetType === 'ERC721' || this.state.assetType === 'ERC1155') && (!data.tokenId || data.tokenId.trim() === '')) {
@@ -174,17 +141,6 @@ class Step1ES extends Component {
       syscoinWitnessAddressValMsg: val.syscoinWitnessAddressVal
         ? ""
         : this.props.t("step2FundingAddress"),
-      
-      receiptStatusValMsg: "",
-      receiptTxHashValMsg: "",
-      receiptTxIndexValMsg: "",
-      receiptFromValMsg: "",
-      receiptToValMsg: "",
-      receiptBlockhashValMsg: "",
-      receiptBlocknumberValMsg: "",
-      receiptTotalGasValMsg: "",
-      receiptGasValMsg: "",
-      receiptObjValMsg: "",
     };
     return errMsgs;
   }
@@ -199,38 +155,6 @@ class Step1ES extends Component {
       assetType: this.state.assetType,
       tokenId: this.state.tokenId
     };
-  }
-  setStateFromReceipt(receipt, error, confirmation, validateNewInput) {
-    if (
-      receipt.transactionHash &&
-      this.state.receiptTxHash !== receipt.transactionHash
-    ) {
-      return;
-    }
-    if (
-      receipt.status !== undefined &&
-      receipt.status !== "1" &&
-      receipt.status !== true &&
-      receipt.status !== "true" &&
-      receipt.status !== "0x1"
-    ) {
-      error = this.props.t("step3ErrorEVMCheckLog");
-    }
-
-    validateNewInput.receiptObj = receipt;
-    validateNewInput.receiptStatus = receipt.status === true ? "true" : "false";
-    validateNewInput.receiptTxHash = receipt.transactionHash;
-    validateNewInput.receiptTxIndex = receipt.transactionIndex;
-    validateNewInput.receiptFrom = receipt.from;
-    validateNewInput.receiptTo = receipt.to;
-    validateNewInput.receiptBlockhash = receipt.blockHash;
-    validateNewInput.receiptBlocknumber = receipt.blockNumber;
-    validateNewInput.receiptTotalGas = receipt.cumulativeGasUsed;
-    validateNewInput.receiptGas = receipt.gasUsed;
-    validateNewInput.receiptConf = confirmation;
-    validateNewInput.buttonVal = error !== null ? false : true;
-    validateNewInput.buttonValMsg =
-      error !== null ? error : this.props.t("step3Success");
   }
 
   async getAssetContract(guid, validateNewInput) {
@@ -268,7 +192,7 @@ class Step1ES extends Component {
   ) {
     let thisObj = this
 
-    thisObj.state.receiptObj = null;
+    thisObj.setState({ working: true }); // Start with Burn button disabled
 
     syscoinERC20Manager.methods
       .freezeBurn(amount, sysxContract, tokenId, syscoinWitnessAddress)
@@ -279,44 +203,30 @@ class Step1ES extends Component {
         transactionPollingTimeout: 1800,
       })
       .once("transactionHash", function (hash) {
-        validateNewInput.buttonVal = true;
-        validateNewInput.receiptTxHash = hash;
-        validateNewInput.buttonValMsg = thisObj.props.t("step3AuthMetamask");
+        // 1. Update state
+        validateNewInput.receiptTxHash = hash; // Make sure this object gets the hash
+        validateNewInput.buttonValMsg = "Transaction Submitted...";
         thisObj.setState(
           Object.assign(
             userInput,
-            validateNewInput,
+            validateNewInput, // Contains hash, button msg
             thisObj._validationErrors(validateNewInput)
           )
         );
-        thisObj.setState({ working: true });
-      })
-      .once("confirmation", function (confirmationNumber, receipt) {
-        if (thisObj.state.receiptObj === null) {
-          thisObj.setStateFromReceipt(
-            receipt,
-            null,
-            confirmationNumber,
-            validateNewInput
-          );
-          thisObj.setState(
-            Object.assign(
-              userInput,
-              validateNewInput,
-              thisObj._validationErrors(validateNewInput)
-            )
-          );
-          thisObj.setState({ working: false });
-          thisObj.saveToLocalStorage();
+        thisObj.setState({ working: true }); // Keep button disabled
+
+        // 2. Update shared store (ESSENTIAL for Step 2)
+        thisObj.props.updateStore({ receiptTxHash: hash });
+
+        // 3. Update localStorage (Good for persistence)
+        localStorage.setItem("receiptTxHash", hash);
+
+        // 4. Navigate (The Core Action)
+        if (thisObj.props.jumpToStep) {
+            thisObj.props.jumpToStep(1);
         } else {
-          validateNewInput.receiptConf = confirmationNumber;
-          thisObj.setState(
-            Object.assign(
-              userInput,
-              validateNewInput,
-              thisObj._validationErrors(validateNewInput)
-            )
-          );
+            // Minimal fallback if jumpToStep isn't passed correctly
+            thisObj.setState({ buttonValMsg: "Tx submitted. Pls click Next.", working: false});
         }
       })
       .on("error", (error, receipt) => {
@@ -329,7 +239,6 @@ class Step1ES extends Component {
         let message = error.message.toString();
         if (message.indexOf("might still be mined") === -1) {
           if (receipt) {
-            thisObj.setStateFromReceipt(receipt, message, 0, validateNewInput);
             thisObj.setState(
               Object.assign(
                 userInput,
@@ -835,107 +744,6 @@ class Step1ES extends Component {
                     <div className={notValidClasses.buttonValGrpCls}>
                       {this.state.buttonValMsg}
                     </div>
-                  </div>
-                </div>
-              </div>
-              <div className="row">
-                <div className="col-md-12">
-                  <Tabs>
-                    <TabList>
-                      <Tab>{this.props.t("tabGeneral")}</Tab>
-                      <Tab>{this.props.t("tabAdvanced")}</Tab>
-                    </TabList>
-                    <TabPanel>
-                      <code className="block">
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptStatus")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptStatus}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTxHash")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptTxHash}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTxIndex")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptTxIndex}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptFrom")}:
-                        </span>{" "}
-                        <span className="result">{this.state.receiptFrom}</span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTo")}:
-                        </span>
-                        <span className="result">{this.state.receiptTo}</span>
-                        <br />
-                      </code>
-                    </TabPanel>
-                    <TabPanel>
-                      <code className="block">
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptBlockhash")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptBlockhash}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptBlocknumber")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptBlocknumber}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTotalGas")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptTotalGas}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptGas")}:
-                        </span>{" "}
-                        <span className="result">{this.state.receiptGas}</span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptConfirmations")}:
-                        </span>{" "}
-                        <span className="result">{this.state.receiptConf}</span>
-                        <br />
-                      </code>
-                    </TabPanel>
-                  </Tabs>
-                </div>
-              </div>
-              <div className="row">
-                <div className="col-md-4 col-sm-12 col-centered">
-                  <div>
-                    <button
-                      type="button"
-                      disabled={!this.state.receiptObj || this.state.working}
-                      className="form-control btn btn-default formbtn"
-                      aria-label={this.props.t("step3Download")}
-                      onClick={this.downloadReceipt}
-                    >
-                      <span
-                        className="glyphicon glyphicon-download"
-                        aria-hidden="true"
-                      >
-                        &nbsp;
-                      </span>
-                      {this.props.t("step3Download")}
-                    </button>
                   </div>
                 </div>
               </div>
