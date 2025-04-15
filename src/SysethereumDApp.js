@@ -20,10 +20,6 @@ class SysethereumDApp extends Component {
       sysToEthDisplay: false,
       sysToSysxDisplay: false,
       sysxToSysDisplay: false,
-      emailName: "",
-      emailSender: "",
-      emailMessage: "",
-      emailSent: false,
       isInstalled: false,
       controller: null,
     };
@@ -33,8 +29,6 @@ class SysethereumDApp extends Component {
     this.onSysToEth = this.onSysToEth.bind(this);
     this.onEthToSys = this.onEthToSys.bind(this);
     this.onHome = this.onHome.bind(this);
-    this.handleEmailChange = this.handleEmailChange.bind(this);
-    this.handleEmailSubmit = this.handleEmailSubmit.bind(this);
     this.relayURL = CONFIGURATION.NEVMAddressExplorerURL + rconfig.contract;
   }
 
@@ -115,25 +109,6 @@ class SysethereumDApp extends Component {
     });
   }
 
-  handleEmailChange(evt) {
-    this.setState({ [evt.target.name]: evt.target.value });
-  }
-
-  handleEmailSubmit(evt) {
-    evt.preventDefault();
-    var self = this;
-
-    axios
-      .post("https://syscoin.org/email_sender.php", {
-        name: this.state.emailName,
-        email: this.state.emailSender,
-        msg: this.state.emailMessage,
-      })
-      .then(function (response) {
-        if (response.data.status === 1) self.setState({ emailSent: true });
-      });
-  }
-
   render() {
     return (
       <div>
@@ -189,7 +164,7 @@ class SysethereumDApp extends Component {
                   <i className="demo-icon icon-help"></i> FAQ
                 </a>
 
-                <a href="#contact">
+                <a href="https://discord.com/invite/syscoin">
                   <i className="demo-icon icon-comment-alt2"></i> Contact
                 </a>
 
@@ -629,67 +604,6 @@ class SysethereumDApp extends Component {
                   https://github.com/syscoin/sysethereum-docs
                 </a>
               </p>
-            </div>
-          </div>
-
-          <div className="section contact">
-            <div className="contact">
-              <a className="anchor" name="contact"></a>
-              <div className="ornament"></div>
-              <h1>Contact</h1>
-
-              <form onSubmit={this.handleEmailSubmit}>
-                <div className="form-group">
-                  <label htmlFor="emailaddr">Email address</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    id="emailaddr"
-                    required
-                    onChange={this.handleEmailChange}
-                    name="emailSender"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="yourname">Your name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    id="yourname"
-                    required
-                    onChange={this.handleEmailChange}
-                    name="emailName"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="message">Message</label>
-                  <Textarea
-                    className="form-control"
-                    id="message"
-                    minRows={1}
-                    required
-                    onChange={this.handleEmailChange}
-                    name="emailMessage"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="btn btn-default"
-                  disabled={this.state.emailSent}
-                >
-                  Send
-                </button>
-
-                <div className={this.state.emailSent ? "visible" : "hidden"}>
-                  <p className="bg-success">
-                    Thank you for reaching out to us, we will get back to you as
-                    soon as possible.
-                  </p>
-                </div>
-              </form>
             </div>
           </div>
 
