@@ -629,18 +629,25 @@ class SysethereumDApp extends Component {
                   Syscoin faucet
                 </a>
                 <a
+                  href="https://explorer-blockbook.syscoin.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  UTXO explorer
+                </a>
+                <a
+                  href="https://explorer.syscoin.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  NEVM explorer
+                </a>
+                <a
                   href="https://syscoin.readme.io/"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   Developer Portal
-                </a>
-                <a
-                  href="https://blockbook.elint.services/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Syscoin explorer
                 </a>
                 <a
                   href="https://syscoin.org/whitepaper"
