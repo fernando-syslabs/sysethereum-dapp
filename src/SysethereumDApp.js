@@ -178,25 +178,25 @@ class SysethereumDApp extends Component {
               <div className="bridge">
                 <a className="systosysx" href="#" onClick={this.onSysToSysx}>
                   <div className="mybtn mybtn-two">
-                    <span>SYS ➜ SYSX</span>
+                    <span>SYS <sub>UTXO</sub> ➜ SYSX <sub>UTXO</sub></span>
                   </div>
                 </a>
 
                 <a className="systoeth" href="#" onClick={this.onSysToEth}>
                   <div className="mybtn mybtn-two">
-                    <span>SYSX ➜ NEVM</span>
+                    <span>UTXO ➜ NEVM</span>
                   </div>
                 </a>
 
                 <a className="ethtosys" href="#" onClick={this.onEthToSys}>
                   <div className="mybtn mybtn-two">
-                    <span>NEVM ➜ SYSX</span>
+                    <span>NEVM ➜ UTXO</span>
                   </div>
                 </a>
 
                 <a className="sysxtosys" href="#" onClick={this.onSysxToSys}>
                   <div className="mybtn mybtn-two">
-                    <span>SYSX ➜ SYS</span>
+                    <span>SYSX <sub>UTXO</sub> ➜ SYS <sub>UTXO</sub></span>
                   </div>
                 </a>
 
@@ -730,7 +730,7 @@ class SysethereumDApp extends Component {
             <div className="wizardTitle">
               <span className="ethl">NEVM</span>
               <span className="direction">➜</span>
-              <span className="sysr">SYSX</span>
+              <span className="sysr">UTXO</span>
             </div>
           </div>
 
@@ -760,9 +760,9 @@ class SysethereumDApp extends Component {
 
           <div className="wizardTitleCont">
             <div className="wizardTitle">
-              <span className="sysl">SYS</span>
+              <span className="sysl">SYS <sub>UTXO</sub></span>
               <span className="direction">➜</span>
-              <span className="sysl">SYSX</span>
+              <span className="sysl">SYSX <sub>UTXO</sub></span>
             </div>
           </div>
 
@@ -790,7 +790,7 @@ class SysethereumDApp extends Component {
 
           <div className="wizardTitleCont">
             <div className="wizardTitle">
-              <span className="sysl">SYSX</span>
+              <span className="sysl">UTXO</span>
               <span className="direction">➜</span>
               <span className="ethr">NEVM</span>
             </div>
@@ -820,9 +820,9 @@ class SysethereumDApp extends Component {
 
           <div className="wizardTitleCont">
             <div className="wizardTitle">
-              <span className="sysl">SYSX</span>
+              <span className="sysl">SYSX <sub>UTXO</sub></span>
               <span className="direction">➜</span>
-              <span className="sysl">SYS</span>
+              <span className="sysl">SYS <sub>UTXO</sub></span>
             </div>
           </div>
 
