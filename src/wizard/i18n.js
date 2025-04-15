@@ -115,7 +115,6 @@ i18n.use(LanguageDetector).init({
         'step3ReceiptTotalGas': 'Cumulative Gas Used',  
         'step3ReceiptGas': 'Gas Used',
         'step3ReceiptConfirmations': 'Confirmations',
-        'step3Download': 'Download Receipt Log',
         'step3ErrorEventCheckLog': 'Error! Cannot find TokenUnfreeze event in Transaction Receipt. Please check the Receipt Log for more details',
         'step4Head': '<em className="step">Step 4:</em> Complete!',
         'step4Description': 'Transaction was successfully completed. You now can use your Syscoin SPT on the NEVM network through an ERC20. You can view your transaction here: '
@@ -232,7 +231,6 @@ i18n.use(LanguageDetector).init({
         'step3ReceiptTotalGas': 'Gas Acumulado Usado',
         'step3ReceiptGas': 'Gas Usado',
         'step3ReceiptConfirmations': 'Confirmaciones',
-        'step3Download': 'Descargar Registro del Recibo',
         'step3ErrorEventCheckLog': '¡Error! No se puede encontrar el evento TokenUnfreeze en el Recibo de Transacción. Por favor, revisa el Registro del Recibo para más detalles',
         'step4Head': '<em className="step">Paso 4:</em> ¡Completado!',
         'step4Description': 'La transacción se completó con éxito. Ahora puedes usar tu Syscoin SPT en la red NEVM a través de un ERC20. Puedes ver tu transacción aquí: '
@@ -349,7 +347,6 @@ i18n.use(LanguageDetector).init({
         'step3ReceiptTotalGas': 'Gaz Cumulé Utilisé',
         'step3ReceiptGas': 'Gaz Utilisé',
         'step3ReceiptConfirmations': 'Confirmations',
-        'step3Download': 'Télécharger le Journal du Reçu',
         'step3ErrorEventCheckLog': 'Erreur ! Impossible de trouver l\'événement TokenUnfreeze dans le Reçu de Transaction. Veuillez consulter le Journal du Reçu pour plus de détails',
         'step4Head': '<em className="step">Étape 4 :</em> Terminé !',
         'step4Description': 'La transaction a été complétée avec succès. Vous pouvez maintenant utiliser votre Syscoin SPT sur le réseau NEVM via un ERC20. Vous pouvez voir votre transaction ici : '
@@ -466,7 +463,6 @@ i18n.use(LanguageDetector).init({
         'step3ReceiptTotalGas': '累计 Gas 消耗',
         'step3ReceiptGas': 'Gas 消耗',
         'step3ReceiptConfirmations': '确认数',
-        'step3Download': '下载收据日志',
         'step3ErrorEventCheckLog': '错误！在交易收据中找不到 TokenUnfreeze 事件。请检查收据日志以获取更多详细信息',
         'step4Head': '<em className="step">第 4 步：</em> 完成！',
         'step4Description': '交易已成功完成。您现在可以通过 ERC20 在 NEVM 网络上使用您的 Syscoin SPT。您可以在此处查看您的交易：'
@@ -583,7 +579,6 @@ i18n.use(LanguageDetector).init({
         'step3ReceiptTotalGas': 'الغاز التراكمي المستخدم',
         'step3ReceiptGas': 'الغاز المستخدم',
         'step3ReceiptConfirmations': 'التأكيدات',
-        'step3Download': 'تنزيل سجل الإيصال',
         'step3ErrorEventCheckLog': 'خطأ! تعذر العثور على حدث TokenUnfreeze في إيصال المعاملة. يرجى التحقق من سجل الإيصال لمزيد من التفاصيل',
         'step4Head': '<em className="step">الخطوة 4:</em> اكتملت!',
         'step4Description': 'تمت المعاملة بنجاح. يمكنك الآن استخدام Syscoin SPT الخاص بك على شبكة NEVM من خلال ERC20. يمكنك عرض معاملتك هنا: '

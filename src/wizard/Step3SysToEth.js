@@ -25,7 +25,6 @@ class Step3 extends Component {
       working: false,
     };
     this.submitProofs = this.submitProofs.bind(this);
-    this.downloadReceipt = this.downloadReceipt.bind(this);
     this.setStateFromReceipt = this.setStateFromReceipt.bind(this);
     this.isValidated = this.isValidated.bind(this);
   }
@@ -46,17 +45,6 @@ class Step3 extends Component {
   }
 
   componentWillUnmount() {}
-  downloadReceipt() {
-    const element = document.createElement("a");
-    const file = new Blob(
-      [JSON.stringify(this.state.receiptObj, null, "   ")],
-      { type: "text/plain" }
-    );
-    element.href = URL.createObjectURL(file);
-    element.download = "receipt.txt";
-    document.body.appendChild(element); // Required for this to work in FireFox
-    element.click();
-  }
 
   setStateFromReceipt(receipt, error, confirmation) {
     if (
@@ -414,27 +402,6 @@ class Step3 extends Component {
                       </code>
                     </TabPanel>
                   </Tabs>
-                </div>
-              </div>
-              <div className="row">
-                <div className="col-md-4 col-sm-12 col-centered">
-                  <div>
-                    <button
-                      type="button"
-                      disabled={!this.state.receiptObj || this.state.working}
-                      className="form-control btn btn-default formbtn"
-                      aria-label={this.props.t("step3Download")}
-                      onClick={this.downloadReceipt}
-                    >
-                      <span
-                        className="glyphicon glyphicon-download"
-                        aria-hidden="true"
-                      >
-                        &nbsp;
-                      </span>
-                      {this.props.t("step3Download")}
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
