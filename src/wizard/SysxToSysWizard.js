@@ -67,7 +67,7 @@ class SysxToSysWizard extends Component {
           <StepZilla
             steps={steps}
             preventEnterSubmission={true}
-            nextTextOnFinalActionStep={t("nextTextOnFinalActionStep")}
+            nextTextOnFinalActionStep={t("nextButtonText")}
             nextButtonText={t("nextButtonText")}
             backButtonText={t("backButtonText")}
             startAtStep={window.sessionStorage.getItem('stepsx') ? parseFloat(window.sessionStorage.getItem('stepsx')) : 0}
