@@ -1,6 +1,4 @@
 import React, { Component } from "react";
-import { Tab, Tabs, TabList, TabPanel } from "react-tabs";
-import "react-tabs/style/react-tabs.css";
 import rconfig from "../SyscoinRelayI";
 import { getProof } from "bitcoin-proof";
 import Web3 from "web3";
@@ -14,14 +12,6 @@ class Step3 extends Component {
     this.state = {
       receiptStatus: "",
       receiptTxHash: "",
-      receiptTxIndex: "",
-      receiptFrom: "",
-      receiptTo: "",
-      receiptBlockhash: "",
-      receiptBlocknumber: "",
-      receiptTotalGas: "",
-      receiptGas: "",
-      receiptObj: null,
       working: false,
     };
     this.submitProofs = this.submitProofs.bind(this);
@@ -45,52 +35,6 @@ class Step3 extends Component {
   }
 
   componentWillUnmount() {}
-
-  setStateFromReceipt(receipt, error, confirmation) {
-    if (
-      receipt.transactionHash &&
-      this.state.receiptTxHash !== receipt.transactionHash
-    ) {
-      return;
-    }
-    var found = false;
-    if (receipt.events) {
-      for (var key in receipt.events) {
-        if (receipt.events.hasOwnProperty(key)) {
-          if (
-            receipt.events[key].raw &&
-            receipt.events[key].raw.topics &&
-            receipt.events[key].raw.topics.length > 0
-          ) {
-            if (
-              receipt.events[key].raw.topics[0] ===
-              CONFIGURATION.TokenUnfreezeFn
-            ) {
-              found = true;
-            }
-          }
-        }
-      }
-    }
-    if (!found) {
-      error = this.props.t("step3ErrorEventCheckLog");
-    }
-    this.setState({
-      receiptObj: receipt,
-      receiptStatus: receipt.status === true ? "true" : "false",
-      receiptTxHash: receipt.transactionHash,
-      receiptTxIndex: receipt.transactionIndex,
-      receiptFrom: receipt.from,
-      receiptTo: receipt.to,
-      receiptBlockhash: receipt.blockHash,
-      receiptBlocknumber: receipt.blockNumber,
-      receiptTotalGas: receipt.cumulativeGasUsed,
-      receiptGas: receipt.gasUsed,
-      receiptConf: confirmation,
-      buttonVal: error !== null ? false : true,
-      buttonValMsg: error !== null ? error : this.props.t("step3Success"),
-    });
-  }
 
   async submitProofs() {
     const isBitcoinBased = window.pali.isBitcoinBased();
@@ -186,15 +130,6 @@ class Step3 extends Component {
     this.setState({
       receiptStatus: "",
       receiptTxHash: "",
-      receiptTxIndex: "",
-      receiptFrom: "",
-      receiptTo: "",
-      receiptBlockhash: "",
-      receiptBlocknumber: "",
-      receiptTotalGas: "",
-      receiptGas: "",
-      receiptConf: 0,
-      receiptObj: null,
       buttonVal: true,
       buttonValMsg: "",
     });
@@ -322,86 +257,6 @@ class Step3 extends Component {
                       {this.state.buttonValMsg}
                     </div>
                   </div>
-                </div>
-              </div>
-              <div className="row">
-                <div className="col-md-12">
-                  <Tabs>
-                    <TabList>
-                      <Tab>{this.props.t("tabGeneral")}</Tab>
-                      <Tab>{this.props.t("tabAdvanced")}</Tab>
-                    </TabList>
-                    <TabPanel>
-                      <code className="block">
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptStatus")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptStatus}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTxHash")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptTxHash}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTxIndex")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptTxIndex}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptFrom")}:
-                        </span>{" "}
-                        <span className="result">{this.state.receiptFrom}</span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTo")}:
-                        </span>
-                        <span className="result">{this.state.receiptTo}</span>
-                        <br />
-                      </code>
-                    </TabPanel>
-                    <TabPanel>
-                      <code className="block">
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptBlockhash")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptBlockhash}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptBlocknumber")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptBlocknumber}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptTotalGas")}:
-                        </span>{" "}
-                        <span className="result">
-                          {this.state.receiptTotalGas}
-                        </span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptGas")}:
-                        </span>{" "}
-                        <span className="result">{this.state.receiptGas}</span>
-                        <br />
-                        <span className="dataname">
-                          {this.props.t("step3ReceiptConfirmations")}:
-                        </span>{" "}
-                        <span className="result">{this.state.receiptConf}</span>
-                        <br />
-                      </code>
-                    </TabPanel>
-                  </Tabs>
                 </div>
               </div>
             </div>
