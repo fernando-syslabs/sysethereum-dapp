@@ -225,7 +225,7 @@ class SysethereumDApp extends Component {
                   <i className="demo-icon icon-icon-telegram"></i>
                 </a>
                 <a
-                  href="https://discord.gg/RkK2AXD"
+                  href="https://discord.com/invite/syscoin"
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Discord"
@@ -629,13 +629,6 @@ class SysethereumDApp extends Component {
                   Syscoin faucet
                 </a>
                 <a
-                  href="https://syscoin.network/syslinks/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Syscoin links
-                </a>
-                <a
                   href="https://syscoin.readme.io/"
                   target="_blank"
                   rel="noopener noreferrer"
@@ -683,7 +676,7 @@ class SysethereumDApp extends Component {
                   <i className="demo-icon icon-icon-telegram"></i>
                 </a>
                 <a
-                  href="https://discord.gg/RkK2AXD"
+                  href="https://discord.com/invite/syscoin"
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Discord"
