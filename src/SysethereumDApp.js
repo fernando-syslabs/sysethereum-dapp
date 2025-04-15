@@ -121,7 +121,7 @@ class SysethereumDApp extends Component {
                 rel="noopener noreferrer"
                 className="logo"
               ></a>
-              <h1>Syscoin - NEVM Bridge</h1>
+              <h1>Syscoin<br/>UTXO - NEVM<br/>Bridge</h1>
 
               <div className="bottom">
                 <div className="equals">
