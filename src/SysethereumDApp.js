@@ -1,6 +1,8 @@
 import React, { Component } from "react";
 import "./SysethereumDApp.css";
 // import bridgeAnim from "./imgs/bridge_diagram.svg";
+import GlobalStateManager from './GlobalStateManager';
+import AppContext from './AppContext';
 import SysToEthWizardi18n from "./wizard/SysToEthWizard";
 import SysToSysxWizardi18n from "./wizard/SysToSysxWizard";
 import SysxToSysWizardi18n from "./wizard/SysxToSysWizard";
@@ -14,6 +16,7 @@ import axios from "axios";
 class SysethereumDApp extends Component {
   constructor(props) {
     super(props);
+    this.globalContext = new GlobalStateManager('SysethereumDApp');
     this.state = {
       introDisplay: true,
       ethToSysDisplay: false,
@@ -22,6 +25,8 @@ class SysethereumDApp extends Component {
       sysxToSysDisplay: false,
       isInstalled: false,
       controller: null,
+      paliDetected: false,
+      web3Detected: false,
     };
 
     this.onSysToSysx = this.onSysToSysx.bind(this);
@@ -33,34 +38,33 @@ class SysethereumDApp extends Component {
   }
 
   componentDidMount() {
-    const callback = (event) => {
-      console.log({ event });
-      if (event.detail.pali) {
-        this.setState({
-          ...this.state,
-          isInstalled: true,
-        });
-
-        console.log("syscoin is installed");
-
-        if (event.detail.pali) {
-          console.log("componentDidMount: controller is set");
-          this.setState({
-            ...this.state,
-            controller: window.pali,
-          });
-
-          return;
+    // Watch for pali
+    if (this.globalContext.get('paliCheckIntervalId')) {
+      console.warn('Another instance of SysethereumDApp is already watching for Pali.');
+    } else {
+      const paliCheckIntervalId = setInterval(() => {
+        const currentIntervalId = this.globalContext.get('paliCheckIntervalId');
+        if (window.pali) {
+          this.setState({ paliDetected: true });
         }
+        if (currentIntervalId) {
+          clearInterval(currentIntervalId);
+          // Use *WithNotify to trigger potential updates in other subscribed components
+          this.globalContext.set('paliCheckIntervalId', null);
+        }
+      }, 500);
+      // Store the new interval ID globally (use *WithNotify)
+      this.globalContext.set('paliCheckIntervalId', paliCheckIntervalId);
+    }
+  }
 
-        return;
-      }
-
-      window.removeEventListener("SyscoinStatus", callback);
-    };
-
-
-    window.addEventListener("SyscoinStatus", callback);
+  componentWillUnmount() {
+    // Make sure to clear the interval if it's still active before unmounting.
+    const currentIntervalId = this.globalContext.get('paliCheckIntervalId');
+    if (currentIntervalId) {
+      clearInterval(currentIntervalId);
+      this.globalContext.set('paliCheckIntervalId', null);
+    }
   }
 
   onSysToSysx() {
@@ -111,6 +115,7 @@ class SysethereumDApp extends Component {
 
   render() {
     return (
+    <AppContext.Provider value={{ ...this.state }}>
       <div>
         <div className={this.state.introDisplay ? "visible" : "hidden"}>
           <div className="intro">
@@ -843,6 +848,7 @@ class SysethereumDApp extends Component {
           </button>
         </div>
       </div>
+    </AppContext.Provider>
     );
   }
 }
