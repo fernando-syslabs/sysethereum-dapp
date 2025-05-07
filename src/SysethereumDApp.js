@@ -139,7 +139,7 @@ class SysethereumDApp extends Component {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="logo"
-              ></a>
+              >&nbsp;</a>
               <h1>Syscoin<br/>UTXO - NEVM<br/>Bridge</h1>
 
               <div className="bottom">
@@ -195,25 +195,25 @@ class SysethereumDApp extends Component {
 
             <div className="right">
               <div className="bridge">
-                <a className="systosysx" href="#" onClick={this.onSysToSysx}>
+                <a className="systosysx" href="#!" onClick={this.onSysToSysx}>
                   <div className="mybtn mybtn-two">
                     <span>SYS <sub>UTXO</sub> ➜ SYSX <sub>UTXO</sub></span>
                   </div>
                 </a>
 
-                <a className="systoeth" href="#" onClick={this.onSysToEth}>
+                <a className="systoeth" href="#!" onClick={this.onSysToEth}>
                   <div className="mybtn mybtn-two">
                     <span>UTXO ➜ NEVM</span>
                   </div>
                 </a>
 
-                <a className="ethtosys" href="#" onClick={this.onEthToSys}>
+                <a className="ethtosys" href="#!" onClick={this.onEthToSys}>
                   <div className="mybtn mybtn-two">
                     <span>NEVM ➜ UTXO</span>
                   </div>
                 </a>
 
-                <a className="sysxtosys" href="#" onClick={this.onSysxToSys}>
+                <a className="sysxtosys" href="#!" onClick={this.onSysxToSys}>
                   <div className="mybtn mybtn-two">
                     <span>SYSX <sub>UTXO</sub> ➜ SYS <sub>UTXO</sub></span>
                   </div>
@@ -280,7 +280,7 @@ class SysethereumDApp extends Component {
           </div>
           <div className="section">
             <div className="howitworks">
-              <a className="anchor" name="how-it-works"></a>
+              <a className="anchor" name="how-it-works" href="#!">&nbsp;</a>
               <div className="ornament"></div>
               <h1>How it works?</h1>
 
@@ -323,8 +323,8 @@ class SysethereumDApp extends Component {
                   <strong>Burn SPT</strong>
                   <br />
                   Provably burn on the Syscoin blockchain.{" "}
-                  <a href="#" onClick={this.onSysToEth}>
-                    SYS ➜ NEVM
+                  <a href="#!" onClick={this.onSysToEth}>
+                    UTXO ➜ NEVM
                   </a>
                 </li>
                 <li>
@@ -354,8 +354,8 @@ class SysethereumDApp extends Component {
                   <strong>Burn ERC20</strong>
                   <br />
                   Provably burn ERC20 on the NEVM blockchain.{" "}
-                  <a href="#" onClick={this.onEthToSys}>
-                    NEVM ➜ SYS
+                  <a href="#!" onClick={this.onEthToSys}>
+                    NEVM ➜ UTXO
                   </a>
                 </li>
                 <li>
@@ -423,7 +423,7 @@ class SysethereumDApp extends Component {
 
           <div className="section dark">
             <div className="faq">
-              <a className="anchor" name="faq"></a>
+              <a className="anchor" name="faq" href="#!">&nbsp;</a>
               <div className="ornament none"></div>
               <h1>FAQ</h1>
 
@@ -628,7 +628,7 @@ class SysethereumDApp extends Component {
 
           <div className="section dark moreinfo">
             <div className="moreinfo">
-              <a className="anchor" name="information"></a>
+              <a className="anchor" name="information" href="#!">&nbsp;</a>
               <div className="ornament none"></div>
               <h1>More information</h1>
 
