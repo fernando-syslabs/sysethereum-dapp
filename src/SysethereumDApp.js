@@ -25,7 +25,7 @@ class SysethereumDApp extends Component {
       sysxToSysDisplay: false,
       isInstalled: false,
       controller: null,
-      paliDetected: false,
+      paliDetected: typeof window.pali !== 'undefined',
       web3Detected: false,
     };
 
@@ -35,24 +35,38 @@ class SysethereumDApp extends Component {
     this.onEthToSys = this.onEthToSys.bind(this);
     this.onHome = this.onHome.bind(this);
     this.relayURL = CONFIGURATION.NEVMAddressExplorerURL + rconfig.contract;
+    this.handlePaliDetectedChange = this.handlePaliDetectedChange.bind(this);
+  }
+
+  handlePaliDetectedChange(newValue) {
+    // Update local component state when global state changes
+    this.setState({ paliDetected: !!newValue }); // Use !! to ensure boolean
   }
 
   componentDidMount() {
     // Watch for pali
     if (this.globalContext.get('paliCheckIntervalId')) {
       console.warn('Another instance of SysethereumDApp is already watching for Pali.');
+    } else if (this.state.paliDetected) {
+      return;
     } else {
+      const delay_max_ms = 1*1000;
+      const delay_step_ms = 200;
+      let delay_ms = 0;
       const paliCheckIntervalId = setInterval(() => {
-        const currentIntervalId = this.globalContext.get('paliCheckIntervalId');
+        delay_ms += delay_step_ms;
+        console.log('Trying to detect Pali');
+        const intervalId = this.globalContext.get('paliCheckIntervalId');
         if (window.pali) {
-          this.setState({ paliDetected: true });
+          this.globalContext.set('paliDetected', true);
+          if (intervalId) {
+            clearInterval(intervalId);
+            this.globalContext.set('paliCheckIntervalId', null);
+          }
         }
-        if (currentIntervalId) {
-          clearInterval(currentIntervalId);
-          // Use *WithNotify to trigger potential updates in other subscribed components
-          this.globalContext.set('paliCheckIntervalId', null);
-        }
-      }, 500);
+        // Loop control
+        if (delay_ms >= delay_max_ms) clearInterval(intervalId);
+      }, delay_step_ms);
       // Store the new interval ID globally (use *WithNotify)
       this.globalContext.set('paliCheckIntervalId', paliCheckIntervalId);
     }
