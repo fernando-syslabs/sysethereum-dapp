@@ -11,6 +11,8 @@ import detectEthereumProvider from '@metamask/detect-provider';
 const sjs = require("syscoinjs-lib");
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const storageExists = typeof Storage !== 'undefined';
+const TARGET_NEVM_CHAIN_ID_NUM = CONFIGURATION.ChainId ? parseInt(CONFIGURATION.ChainId, 16) : null;
+const TARGET_UTXO_CHAIN_ID_NUM = CONFIGURATION.ChainId ? parseInt(CONFIGURATION.ChainId, 16) : null;
 
 // --- Utility Functions ---
 const isString = (s) => typeof s === 'string' || s instanceof String;
@@ -63,11 +65,10 @@ const validators = {
     try {
       if (web3?.utils?.BN) {
         // Use a known decimals or make it generic for basic > 0 check
-        // The original check used 18, let's stick to that for consistency here
         const amountBN = toBaseUnit(amount.toString(), 18, web3.utils.BN); 
         return amountBN && amountBN.gt(new web3.utils.BN(0));
       } else {
-        // Fallback for when web3 or BN isn't available (as in original)
+        // Fallback for when web3 or BN isn't available
         const amountNum = parseFloat(amount);
         return !isNaN(amountNum) && amountNum > 0;
       }
@@ -81,13 +82,12 @@ const validators = {
   }
 };
 
-// --- Helper function to generate validation classes (Matching original structure) ---
+// --- Helper function to generate validation classes ---
 const getValidationClasses = (isValid, hasMessage = false, isWorking = false, isButton = false) => {
   const mainClass = !isValid ? "has-error" : "has-success";
 
   if (isButton) {
-    // Mimic the exact logic from the original `notValidClasses` for the button
-    const tooltipClass = !isValid || (hasMessage && !isWorking) // && !receiptTxHash ? - This condition was implicitly handled by message content in original
+    const tooltipClass = !isValid || (hasMessage && !isWorking) // && !receiptTxHash ?
       ? "val-err-tooltip mb30"
       : (hasMessage ? "val-info-tooltip mb30" : "val-success-tooltip mb30");
     return {
@@ -106,7 +106,7 @@ const getValidationClasses = (isValid, hasMessage = false, isWorking = false, is
 
 // Component Start
 const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
-  const { ethToSysDisplay } = useContext(AppContext);
+  const { ethToSysDisplay, paliDetected } = useContext(AppContext);
   const store = getStore();
 
   // --- Consolidated State Initialization ---
@@ -118,15 +118,25 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
       if (storedValue !== null) return storedValue;
     }
     return defaultValue;
-    }, [store]); // store is a dependency
+    }, [store]);
 
-  // --- Wallets addresses store
-  const [walletAddresses, setWalletAddresses] = useState({
-    pali: '',  // Current Pali wallet address
-    nevm: ''   // Current NEVM wallet address
+  // --- Wallets addresses store ---
+  const [walletStatus, setWalletStatus] = useState({
+    nevm: {
+      detected: false,
+      account: null,
+      chainId: null,
+      networkOk: false, // Is it on the correct network?
+    },
+    utxo: {
+      detected: false,
+      account: null,
+      chainId: null,
+      networkOk: false, // Is it on the correct network?
+    }
   });
 
-  // Consolidated Form Field Handling
+  // --- Consolidated Form Field Handling ---
   const [formState, setFormState] = useState({
     assetType: getStoredValue('assetType', 'SYS'),
     sysxContract: getStoredValue('sysxContract', ""),
@@ -135,26 +145,30 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
     sysxFromAccount: getStoredValue('sysxFromAccount', ""),
     syscoinWitnessAddress: getStoredValue('syscoinWitnessAddress', ""),
     receiptTxHash: getStoredValue('receiptTxHash', ""),
-    // receiptStatus: getStoredValue('receiptStatus', ''), // Keep if needed, wasn't actively used in validation/render logic shown
-    working: false // Transient state, not persisted intentionally here
+    working: false,
+    allowanceTxHash: (storageExists && localStorage.getItem("allowanceTxHash_ethToSys")) || "",
+    isPollingAllowance: (storageExists && localStorage.getItem("isPollingAllowance_ethToSys") === "true") || false,
   });
 
-  // Unified validation state (matching original state variable structure)
+  // --- Validation State ---
+  // Start fields as potentially invalid until checked or user interacts
+  // Button starts as invalid until environment check passes
   const [validationState, setValidationState] = useState({
-    button: { isValid: true, message: '' }, // Start valid, like original buttonVal
-    sysxFromAccount: { isValid: true, message: '' }, // Matches sysxFromAccountVal, sysxFromAccountValMsg
-    sysxContract: { isValid: true, message: '' }, // Matches sysxContractVal, sysxContractValMsg
-    tokenId: { isValid: true, message: '' }, // Matches tokenIdVal, tokenIdValMsg
-    toSysAmount: { isValid: true, message: '' }, // Matches toSysAmountVal, toSysAmountValMsg
-    syscoinWitnessAddress: { isValid: true, message: '' } // Matches syscoinWitnessAddressVal, syscoinWitnessAddressValMsg
+    button: { isValid: false, message: t("step1ESButton") }, // Initial state reflects pending environment check
+    sysxFromAccount: { isValid: false, message: '' },
+    sysxContract: { isValid: formState.assetType === 'SYS', message: '' }, // Valid if SYS
+    tokenId: { isValid: formState.assetType !== 'ERC721' && formState.assetType !== 'ERC1155', message: '' }, // Valid if not NFT
+    toSysAmount: { isValid: formState.assetType === 'ERC721', message: '' }, // Valid if ERC721 (fixed amount)
+    syscoinWitnessAddress: { isValid: false, message: '' }
   });
 
   // Refs & Web3 State
   const web3InstanceRef = useRef(null);
-  const providerRef = useRef(null);
-  const currentChainIdRef = useRef(null);
+  const nevmProviderRef = useRef(null);
+  const utxoProviderRef = useRef(null);
+  const allowancePollIntervalIdRef = useRef(null);
 
-  // Consolidated LocalStorage Usage
+  // --- Persistence and Form Update ---
   const persistState = useCallback((name, value) => {
     if (persistableFields.includes(name)) {
       if (storageExists) {
@@ -171,128 +185,199 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
         console.warn("updateStore function not provided");
       }
     }
-  }, [updateStore]); // updateStore is a dependency
+  }, [updateStore]);
 
   // Unified form update function
   const updateFormField = useCallback((name, value) => {
     setFormState(prev => ({ ...prev, [name]: value }));
     persistState(name, value);
+  }, [persistState]);
 
-    // Reset button validation message on *any* field change, unless it's a TX hash message
-    // Mimics original `setButtonValMsg('')` in handlers
-    setValidationState(prev => {
-      const currentButtonMsg = prev.button.message || '';
-      const keepMessage = currentButtonMsg.includes(t("step3ReceiptTxHash")) || currentButtonMsg.includes("Transaction timed out"); // Preserve specific messages
-      return {
-        ...prev,
-        button: { ...prev.button, message: keepMessage ? currentButtonMsg : '' }
-      }
-    });
-  }, [persistState, t]); // t is a dependency
+  // --- Dedicated Validation Functions ---
+  const validateSysxFromAccount = useCallback((value) => {
+    if (!value) return { isValid: false, message: t("step1ESEnterFromAccount") };
+    if (!validators.isValidEthereumAddress(value)) return { isValid: false, message: t("step2EthAddress") };
+    return { isValid: true, message: "" };
+  }, [t]);
 
-  // Unified input handler
+  const validateSyscoinWitnessAddress = useCallback((value) => {
+    if (!value) return { isValid: false, message: t("step1ESEnterWitnessAddress") };
+    if (!validators.isValidSyscoinAddress(value)) return { isValid: false, message: t("step2FundingAddress") };
+    return { isValid: true, message: "" };
+  }, [t]);
+
+  const validateSysxContract = useCallback((value, currentAssetType) => {
+    if (currentAssetType === 'SYS') return { isValid: true, message: "" }; // Not needed for SYS
+    if (!value) return { isValid: false, message: t("step1ESEnterSYSXContract") };
+    if (!validators.isValidEthereumAddress(value)) return { isValid: false, message: t("step2SYSXContract") };
+    return { isValid: true, message: "" };
+  }, [t]);
+
+  const validateTokenId = useCallback((value, currentAssetType) => {
+    if (currentAssetType !== 'ERC721' && currentAssetType !== 'ERC1155') return { isValid: true, message: "" }; // Not needed for others
+    if (!validators.isValidTokenId(value)) return { isValid: false, message: t("step2TokenId") };
+    return { isValid: true, message: "" };
+  }, [t]);
+
+  const validateToSysAmount = useCallback((value, currentAssetType) => {
+    if (currentAssetType === 'ERC721') return { isValid: true, message: "" }; // Fixed to 1, always valid conceptually
+    const web3 = web3InstanceRef.current; // Access ref directly
+    if (!validators.isValidAmount(value, web3)) return { isValid: false, message: t("step2Amount") };
+    return { isValid: true, message: "" };
+  }, [t, web3InstanceRef]);
+
+  // --- Field-Specific Validation Runner ---
+  // Helper to run validation based on field name
+  const runFieldValidation = useCallback((name, value) => {
+    let result;
+    switch (name) {
+      case 'sysxFromAccount':
+        result = validateSysxFromAccount(value);
+        break;
+      case 'syscoinWitnessAddress':
+        result = validateSyscoinWitnessAddress(value);
+        break;
+      case 'sysxContract':
+        result = validateSysxContract(value, formState.assetType);
+        break;
+      case 'tokenId':
+        result = validateTokenId(value, formState.assetType);
+        break;
+      case 'toSysAmount':
+        result = validateToSysAmount(value, formState.assetType);
+        break;
+      default:
+        result = { isValid: true, message: "" }; // Default for non-validated fields
+    }
+    setValidationState(prev => ({ ...prev, [name]: result }));
+    return result.isValid; // Return validity for potential chaining
+  }, [
+    formState.assetType, // Needed for context in some validators
+    validateSysxFromAccount,
+    validateSyscoinWitnessAddress,
+    validateSysxContract,
+    validateTokenId,
+    validateToSysAmount
+  ]);
+
+  // --- Unified Input Handler (Triggers Field Validation) ---
   const handleInputChange = useCallback((event) => {
     const { name, value } = event.target;
-    updateFormField(name, value);
-    // Validation is triggered by useEffect watching formState
-  }, [updateFormField]);
+    updateFormField(name, value); // Update state and persist
+    runFieldValidation(name, value); // Run validation for THIS field
+  }, [updateFormField, runFieldValidation]);
 
-
-  // --- Wallet Interaction & State Updates (using unified state) ---
-  const updateNEVMAddress = useCallback((account) => {
-    updateFormField('sysxFromAccount', account);
-    // Reset specific field validation & potentially button message (handled by updateFormField)
-    setValidationState(prev => ({
-      ...prev,
-      sysxFromAccount: { isValid: true, message: '' },
-      // button message reset handled in updateFormField
-    }));
-  }, [updateFormField]);
-
-  const updateUTXOAddress = useCallback((account) => {
-    updateFormField('syscoinWitnessAddress', account);
-     // Reset specific field validation & potentially button message (handled by updateFormField)
-     setValidationState(prev => ({
-      ...prev,
-      syscoinWitnessAddress: { isValid: true, message: '' },
-      // button message reset handled in updateFormField
-    }));
-  }, [updateFormField]);
-
-
-  // Asset Type Change Handler (adapted for unified state)
+  // --- Asset Type Change Handler ---
   const handleAssetTypeChange = useCallback((event) => {
     const newAssetType = event.target.value;
     const previousAssetType = formState.assetType;
+    const updates = { assetType: newAssetType }; // Collect updates
 
-    // Update asset type first
-    updateFormField('assetType', newAssetType);
-
-    // Adjust related fields - use updateFormField to ensure persistence
-    if (newAssetType === 'SYS') {
-      if (formState.sysxContract) updateFormField('sysxContract', '');
+    // Adjust related fields - Prepare updates, apply them together
+    if (newAssetType === 'SYS' && formState.sysxContract) {
+      updates.sysxContract = '';
     }
-    if (newAssetType !== 'ERC721' && newAssetType !== 'ERC1155') {
-      if (formState.tokenId) updateFormField('tokenId', '');
+    if (newAssetType !== 'ERC721' && newAssetType !== 'ERC1155' && formState.tokenId) {
+      updates.tokenId = '';
     }
-    if (newAssetType === 'ERC721') {
-      // Only update if it's not already '1'
-      if (formState.toSysAmount !== '1') updateFormField('toSysAmount', '1');
-    } else if (previousAssetType === 'ERC721' && formState.toSysAmount === '1') {
-      // Clear amount if switching away from ERC721 where amount was '1'
-      updateFormField('toSysAmount', '');
+    if (newAssetType === 'ERC721' && formState.toSysAmount !== '1') {
+      updates.toSysAmount = '1';
+    } else if (previousAssetType === 'ERC721' && newAssetType !== 'ERC721') {
+      // Clear amount only if switching *away* from ERC721 where it was likely '1'
+      // Keep user input otherwise
+      if (formState.toSysAmount === '1') updates.toSysAmount = '';
     }
 
-    // Reset validation states for potentially affected fields (mimics original)
-    setValidationState(prev => ({
-      ...prev,
-      sysxContract: { isValid: true, message: '' },
-      tokenId: { isValid: true, message: '' },
-      toSysAmount: { isValid: true, message: '' },
-      button: { ...prev.button, message: '' } // Reset button message too
-    }));
-    // The useEffect watching formState will re-run full validation
-  }, [formState.assetType, formState.sysxContract, formState.tokenId, formState.toSysAmount, updateFormField]);
+    // Apply all updates to formState at once
+    setFormState(prev => ({ ...prev, ...updates }));
+    Object.entries(updates).forEach(([name, value]) => persistState(name, value));
 
+    // Re-validate affected fields AFTER state update completes using useEffect or directly.
+    // Using a timeout allows state to settle before validation runs on potentially derived values.
+    setTimeout(() => {
+      if ('sysxContract' in updates || newAssetType === 'SYS' || previousAssetType === 'SYS') {
+        runFieldValidation('sysxContract', updates.sysxContract ?? formState.sysxContract);
+      }
+      if ('tokenId' in updates || newAssetType.includes('ERC') || previousAssetType.includes('ERC')) {
+        runFieldValidation('tokenId', updates.tokenId ?? formState.tokenId);
+      }
+      if ('toSysAmount' in updates || newAssetType === 'ERC721' || previousAssetType === 'ERC721') {
+        runFieldValidation('toSysAmount', updates.toSysAmount ?? formState.toSysAmount);
+      }
+      // Also re-validate fields that *depend* on assetType if they weren't directly updated
+      if (!('sysxContract' in updates) && newAssetType !== 'SYS' && previousAssetType === 'SYS') {
+        runFieldValidation('sysxContract', formState.sysxContract);
+      }
+      // ... potentially others if complex dependencies exist
+    }, 0);
+  }, [formState, persistState, runFieldValidation]);
 
-  // --- Wallet Connection Logic (adapted for unified state) ---
+  const getPaliStateSnapshot = useCallback(async (paliProvider) => {
+    if (!paliProvider) return { account: null, chainId: null, networkOk: false, isBitcoinBased: false };
+
+    const isBitcoinBased = paliProvider?._sysState?.isBitcoinBased === true;
+    if (!isBitcoinBased) {
+      return { account: null, chainId: null, networkOk: false, isBitcoinBased: false };
+    }
+
+    try {
+      const activeAccount = await paliProvider.request({ method: 'wallet_getAccount' });
+      const account = activeAccount?.address || null;
+      let chainId = null;
+      let networkOk = false;
+
+      if (account) {
+        if (account.startsWith("tsys")) chainId = "0x1644"; // 5700
+        else if (account.startsWith("sys")) chainId = "0x39"; // 57
+      }
+
+      if (chainId && TARGET_UTXO_CHAIN_ID_NUM) {
+        networkOk = parseInt(chainId, 16) === TARGET_UTXO_CHAIN_ID_NUM;
+      } else if (chainId) { // If chainId is known but no target, consider it ok.
+        networkOk = true;
+      }
+      // If no account, chainId remains null, networkOk false.
+
+      return { account, chainId, networkOk, isBitcoinBased: true };
+    } catch (err) {
+      console.warn("Error in getPaliStateSnapshot:", err);
+      return { account: null, chainId: null, networkOk: false, isBitcoinBased: isBitcoinBased };
+    }
+  }, []);
+
+  // --- Wallet Connection Logic ---
   const connectPaliWallet = useCallback(async () => {
-    if (!window.pali) {
-      console.error("Pali wallet not detected.");
-      // Set button message directly, as in original
+    const pali = utxoProviderRef.current; // Get from ref
+    if (!pali) {
+      // This message might appear on the button if checkEnvironmentReadiness shows "Install Pali"
+      // and the button is somehow still clicked.
       setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step2InstallPali") } }));
       return;
     }
-    try {
-      const accountInfo = await window.pali.request({ method: 'wallet_getAccount' });
-      if (accountInfo && accountInfo.address) {
-        updateUTXOAddress(accountInfo.address); // This resets field validation and button message
-      } else {
-        const accounts = await window.pali.request({ method: 'sys_requestAccounts' });
-        if (accounts && accounts.length > 0) {
-          const newAccountInfo = await window.pali.request({ method: 'wallet_getAccount' });
-           if (newAccountInfo && newAccountInfo.address) {
-             updateUTXOAddress(newAccountInfo.address); // This resets field validation and button message
-           } else {
-             throw new Error("Could not get address after requesting accounts.");
-           }
-        } else {
-          // Set field and button validation state directly, like original
-          setValidationState(prev => ({ ...prev,
-            syscoinWitnessAddress: { isValid: false, message: '' }, // Original didn't set a field msg here
-            button: { isValid: false, message: t("step2SelectPaliAccount") }
-          }));
-        }
-      }
-    } catch (connectError) {
-      console.error('Failed to connect/get account from Pali wallet:', connectError);
-      // Set field and button validation state directly, like original
-      setValidationState(prev => ({ ...prev,
-        syscoinWitnessAddress: { isValid: false, message: '' }, // Original didn't set a field msg here
-        button: { isValid: false, message: t("step2UnlockPali") }
-      }));
+
+    // Existing checks from your code:
+    if (pali._sysState && pali._sysState.isBitcoinBased !== true) {
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step2SwitchUTXONetwork") } }));
+      return;
     }
-  }, [t, updateUTXOAddress]); // Dependencies
+
+    setFormState(prev => ({ ...prev, working: true })); // Indicate an action is in progress
+    setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step2UnlockPali") + "..." } }));
+
+    try {
+      await pali.request({ method: 'sys_requestAccounts' });
+      // Listeners will update walletStatus. The useEffect listening to walletStatus
+      // will then call checkEnvironmentReadiness to update the button.
+    } catch (err) {
+      console.error("Failed to connect Pali wallet:", err);
+      const message = (err.code === 4001) ? t("step2UserRejectedPali") : (t("genericError") + " (Pali Connect)");
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: message } }));
+      // Ensure account state is nullified on failure
+      setWalletStatus(prev => ({ ...prev, utxo: { ...prev.utxo, account: null } }));
+    } finally {
+      setFormState(prev => ({ ...prev, working: false }));
+    }
+  }, [t, setWalletStatus, setValidationState, setFormState]);
 
   const connectNEVMWallet = useCallback(async (provider) => {
     if (!provider) {
@@ -300,419 +385,674 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
       return;
     }
     try {
-      const accounts = await provider.request({ method: 'eth_requestAccounts' });
-      if (accounts && accounts.length > 0) {
-        updateNEVMAddress(accounts[0]); // Resets field validation and button message
-      } else {
-        // Set field and button validation state directly, like original
-        setValidationState(prev => ({ ...prev,
-          sysxFromAccount: { isValid: false, message: '' }, // Original didn't set field msg here
-          button: { isValid: false, message: t("step3LoginMetamask") }
-        }));
-      }
+      // Trigger connection prompt
+      await provider.request({ method: 'eth_requestAccounts' });
+      // No need to update state here, the 'accountsChanged' listener will do it.
     } catch (error) {
       console.error('Failed to connect NEVM wallet:', error);
-      // Set field and button validation state directly, like original
-      setValidationState(prev => ({ ...prev,
-        sysxFromAccount: { isValid: false, message: '' }, // Original didn't set field msg here
-        button: { isValid: false, message: t("step3LoginMetamask") }
-      }));
+      // Set button state on connection error/rejection
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3LoginMetamask") } }));
     }
-  }, [t, updateNEVMAddress]); // Dependencies
+  }, [t, setValidationState]);
 
-  // --- Event Handlers (adapted for unified state) ---
-  const handleAccountsChanged = useCallback((accounts) => {
-    const account = accounts?.[0] || '';
-    setWalletAddresses(prev => ({ ...prev, nevm: account }));
+  // --- Environment Readiness Check ---
+  const initiateAllowanceTransaction = useCallback(async (contractBase, methodName, methodArgs) => {
+    if (!nevmProviderRef.current || !web3InstanceRef.current) {
+        console.error("initiateAllowanceTransaction: Pre-conditions not met.");
+        setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3InstallMetamask") }}));
+        setFormState(prev => ({ ...prev, working: false }));
+        return;
+    }
 
-    // Only update form if already set (preserves user control)
-    if (formState.sysxFromAccount && formState.sysxFromAccount !== account) {
-      // Show suggestion but don't automatically update
-    } else if (!formState.sysxFromAccount && account) {
-      // Auto-populate empty field
-      updateNEVMAddress(account);
-    } else if (!account && formState.sysxFromAccount) {
-      setValidationState(prev => ({
+    setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step2PleaseSign") } }));
+    setFormState(prev => ({ ...prev, working: true }));
+
+    try {
+      const approvalData = contractBase.methods[methodName](...methodArgs).encodeABI();
+      const gasEstimate = await contractBase.methods[methodName](...methodArgs).estimateGas({ from: formState.sysxFromAccount });
+      const gasLimit = Math.ceil(gasEstimate * 1.2);
+
+      const approvalTxParams = {
+        from: formState.sysxFromAccount,
+        to: contractBase.options.address,
+        data: approvalData,
+        gas: web3InstanceRef.current.utils.toHex(gasLimit),
+      };
+
+      const txHash = await nevmProviderRef.current.request({
+        method: 'eth_sendTransaction',
+        params: [approvalTxParams],
+      });
+      console.log(`${methodName} allowance transaction submitted, hash: ${txHash}`);
+
+      if (storageExists) {
+        localStorage.setItem("allowanceTxHash_ethToSys", txHash);
+        localStorage.setItem("isPollingAllowance_ethToSys", "true");
+      }
+
+      // Update formState to set the new hash and signal that polling should start.
+      // The useEffect hook watching formState.isPollingAllowance will actually start the interval.
+      setFormState(prev => ({
         ...prev,
-        sysxFromAccount: { isValid: false, message: ''},
-        button: { isValid: false, message: t("step3LoginMetamask") }
+        allowanceTxHash: txHash,
+        isPollingAllowance: true,
+        // working: true is already set
       }));
+      // An immediate message after successful submission before polling kicks in:
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3PleaseWait") } }));
+
+
+    } catch (error) {
+      console.error(`Error initiating ${methodName} allowance transaction:`, error);
+      let message = error.message || t("genericError");
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message }}));
+      // Ensure polling is marked false and working is false if TX submission fails
+      setFormState(prev => ({
+        ...prev,
+        working: false,
+        isPollingAllowance: false,
+        // Keep previous allowanceTxHash if this new submission failed, or clear it
+        // allowanceTxHash: "" // Optional: clear hash on submission failure
+      }));
+      if(storageExists) {
+        localStorage.setItem("isPollingAllowance_ethToSys", "false");
+        // localStorage.removeItem("allowanceTxHash_ethToSys"); // Optional
+      }
     }
-  }, [t, updateNEVMAddress, formState.sysxFromAccount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formState.sysxFromAccount, t, web3InstanceRef, nevmProviderRef]);
 
+  const checkEnvironmentReadiness = useCallback(() => {
+    const { nevm, utxo } = walletStatus;
 
-  // Unified validation function - translates field name to validation result
-  const validateField = useCallback((fieldName, value, context = {}) => {
-    const { assetType, web3 } = context;
-
-    switch(fieldName) {
-    case 'sysxFromAccount':
-      return {
-        isValid: !!value && validators.isValidEthereumAddress(value),
-        message: !value ? t("step1ESEnterFromAccount") :
-          !validators.isValidEthereumAddress(value) ? t("step2EthAddress") : ""
-      };
-    case 'syscoinWitnessAddress':
-      return {
-        isValid: !!value && validators.isValidSyscoinAddress(value),
-        message: !value ? t("step1ESEnterWitnessAddress") :
-          !validators.isValidSyscoinAddress(value) ? t("step2FundingAddress") : ""
-      };
-    case 'sysxContract':
-      if (assetType === 'SYS') return { isValid: true, message: "" };
-      return {
-        isValid: !!value && validators.isValidEthereumAddress(value),
-        message: !value ? t("step1ESEnterSYSXContract") :
-          !validators.isValidEthereumAddress(value) ? t("step2SYSXContract") : ""
-      };
-    case 'tokenId':
-      if (assetType !== 'ERC721' && assetType !== 'ERC1155') return { isValid: true, message: "" };
-      return {
-        isValid: validators.isValidTokenId(value),
-        message: !validators.isValidTokenId(value) ? t("step2TokenId") : "" // Original only had one message
-      };
-    case 'toSysAmount':
-      if (assetType === 'ERC721') return { isValid: true, message: "" }; // Amount fixed to 1 for ERC721
-      return {
-        isValid: validators.isValidAmount(value, web3), // Use the centralized validator
-        message: !validators.isValidAmount(value, web3) ? t("step2Amount") : "" // Original only had one message
-      };
-    default:
-      return { isValid: true, message: "" };
+    // Wallet Detection
+    if (!paliDetected) { // Global detection from context
+      return { isOverallReady: false, message: t("step2InstallPali") };
     }
-  }, [t]); // t is a dependency
-
-  // Comprehensive validation check - *replaces* validationCheck, mimics its logic closely
-  const validateAllFields = useCallback(() => {
-    const { assetType, sysxContract, tokenId, toSysAmount, sysxFromAccount, syscoinWitnessAddress, working, receiptTxHash } = formState;
-    const web3 = web3InstanceRef.current;
-    const context = { assetType, web3 };
-    let overallValid = true; // Assume valid initially, like original
-    let buttonMessage = ''; // Store potential button message
-
-    // Calculate individual field validations
-    const newValidations = {
-      sysxFromAccount: validateField('sysxFromAccount', sysxFromAccount, context),
-      syscoinWitnessAddress: validateField('syscoinWitnessAddress', syscoinWitnessAddress, context),
-      sysxContract: validateField('sysxContract', sysxContract, context),
-      tokenId: validateField('tokenId', tokenId, context),
-      toSysAmount: validateField('toSysAmount', toSysAmount, context),
-      button: { isValid: true, message: '' } // Start button fresh
-    };
-
-    // Check if any field validation failed
-    if (!newValidations.sysxFromAccount.isValid) overallValid = false;
-    if (!newValidations.syscoinWitnessAddress.isValid) overallValid = false;
-    if (!newValidations.sysxContract.isValid) overallValid = false;
-    if (!newValidations.tokenId.isValid) overallValid = false;
-    if (!newValidations.toSysAmount.isValid) overallValid = false;
-
-    // Check wallet/chain conditions (mimics original `validationCheck`)
-    const targetChainIdNum = CONFIGURATION.ChainId ? parseInt(CONFIGURATION.ChainId, 16) : null;
-    const currentChainIdNum = currentChainIdRef.current ? parseInt(currentChainIdRef.current, 16) : null;
-
-    if (!providerRef.current) {
-      buttonMessage = t("step3InstallMetamask");
-      overallValid = false;
-    } else if (!currentChainIdNum) { // Check if connected/chainId available
-      buttonMessage = t("step3LoginMetamask");
-      overallValid = false;
-    } else if (!sysxFromAccount) { // Added check - if provider exists but no account, invalid
-      buttonMessage = t("step3LoginMetamask"); // Re-use login message
-      overallValid = false;
-    } else if (targetChainIdNum && currentChainIdNum !== targetChainIdNum) {
-      buttonMessage = t("stepUseMainnet");
-      overallValid = false;
+    if (!utxo.detected) {
+      return { isOverallReady: false, message: t("step2SwitchUTXONetwork") };
+    }
+    if (!nevm.detected) {
+      return { isOverallReady: false, message: t("step3InstallMetamask") };
     }
 
-    // Set the final validation state
-    newValidations.button.isValid = overallValid;
-
-    // Set button message: prioritize specific errors, otherwise keep empty if valid
-    // Don't overwrite specific messages set during operations (like tx hash or working)
-    const existingButtonMsg = validationState.button.message || '';
-    const keepExistingMsg = existingButtonMsg.includes(t("step3ReceiptTxHash")) || existingButtonMsg.includes("timed out") || existingButtonMsg.includes(t("step2PleaseSign")) || existingButtonMsg.includes("Checking allowance") || existingButtonMsg.includes("Approval"); // Preserve operational messages
-
-    if (keepExistingMsg) {
-      newValidations.button.message = existingButtonMsg;
-      newValidations.button.isValid = false; // Operation in progress or completed, button usually disabled
-    } else if (buttonMessage) { // If we got a wallet/chain error
-      newValidations.button.message = buttonMessage;
-    } else if (!overallValid) {
-      // Find the *first* field error message if no specific button message exists
-      const firstError = Object.entries(newValidations)
-        .find(([key, val]) => key !== 'button' && !val.isValid);
-      newValidations.button.message = firstError ? firstError[1].message : t("genericError"); // Fallback message
-    } else {
-      newValidations.button.message = ''; // All valid, clear message
+    // Pali Specific Checks (if UTXO wallet is detected by component)
+    const paliProvider = utxoProviderRef.current;
+    if (paliProvider && paliProvider._sysState && paliProvider._sysState.isBitcoinBased !== true) {
+      return { isOverallReady: false, message: t("step2SwitchPaliToUTXO") };
+    }
+    // These messages are for when Pali IS detected and IS on UTXO mode, but account/network is the issue
+    if (!utxo.account) {
+      return { isOverallReady: false, message: t("step2UnlockPali") }; // "Connect or Unlock Pali"
+    }
+    if (!utxo.networkOk) {
+      return { isOverallReady: false, message: t("step2SwitchUTXONetwork") };
     }
 
-    setValidationState(newValidations);
-    return overallValid; // Return the validity status
-
-  // Dependencies: Recalculate whenever form state changes, or t changes, or the validateField function itself changes (due to t changing)
-  // Also add validationState.button.message to deps? To re-evaluate if the message should be kept.
-  }, [formState, t, validateField, validationState.button.message]);
-
-  const handleChainChanged = useCallback((chainIdHex) => {
-    console.log("Network changed to:", chainIdHex);
-    currentChainIdRef.current = chainIdHex;
-    if (providerRef.current) {
-      web3InstanceRef.current = new Web3(providerRef.current);
+    // NEVM Specific Checks
+    if (!nevm.account) {
+      if (nevm.detected && !nevm.networkOk && nevm.chainId) {
+        return { isOverallReady: false, message: t("stepUseMainnet") };
+      }
+      return { isOverallReady: false, message: t("step3LoginMetamask") };
     }
-    // Explicitly call validateAllFields to ensure immediate validation after chain change
-    validateAllFields();
-  }, [validateAllFields]);
+    if (!nevm.networkOk) {
+      return { isOverallReady: false, message: t("stepUseMainnet") };
+    }
 
+    // All environment checks passed
+    return { isOverallReady: true, message: "" };
+
+  }, [walletStatus, t, paliDetected]);
+
+  // --- Comprehensive Pre-Submission Check ---
+  const validateForSubmission = useCallback(() => {
+    const envCheck = checkEnvironmentReadiness(); // paliDetected is used inside checkEnvironmentReadiness
+
+    // A. If Pali is not globally detected (from context via checkEnvironmentReadiness),
+    //  or if our component state says utxo is not detected, button is invalid.
+    if (!paliDetected || !walletStatus.utxo.detected) {
+      return { isReady: false, message: envCheck.message || t("step2InstallPali") };
+    }
+
+    // B. If the environment itself is NOT ready (e.g., wrong network, account not connected),
+    //  the button is invalid and shows the specific environment message.
+    //  This takes PRECEDENCE over field validation messages for the MAIN BUTTON.
+    if (!envCheck.isOverallReady) {
+      return { isReady: false, message: envCheck.message };
+    }
+
+    // C. Environment IS ready. Now, validate ACTIVE FORM FIELDS.
+    let firstFieldErrorMessage = "";
+    let allFieldsValid = true;
+    const newFieldValidations = {}; // To update individual field validation states
+
+    const fieldsToValidate = ['sysxFromAccount', 'syscoinWitnessAddress'];
+    if (formState.assetType !== 'SYS') fieldsToValidate.push('sysxContract');
+    if (formState.assetType === 'ERC721' || formState.assetType === 'ERC1155') fieldsToValidate.push('tokenId');
+    if (formState.assetType !== 'ERC721') fieldsToValidate.push('toSysAmount');
+
+    for (const name of fieldsToValidate) {
+      const value = formState[name];
+      let result;
+      // Field-specific validation calls (no change here)
+      switch (name) {
+        case 'sysxFromAccount': result = validateSysxFromAccount(value); break;
+        case 'syscoinWitnessAddress': result = validateSyscoinWitnessAddress(value); break;
+        case 'sysxContract': result = validateSysxContract(value, formState.assetType); break;
+        case 'tokenId': result = validateTokenId(value, formState.assetType); break;
+        case 'toSysAmount': result = validateToSysAmount(value, formState.assetType); break;
+        default: result = { isValid: true, message: "" };
+      }
+      newFieldValidations[name] = result; // Store for individual field feedback
+      if (!result.isValid) {
+        allFieldsValid = false;
+        if (!firstFieldErrorMessage) firstFieldErrorMessage = result.message;
+      }
+    }
+
+    // Update the validation state for all individual fields
+    setValidationState(prev => ({ ...prev, ...newFieldValidations }));
+
+    if (!allFieldsValid) {
+      // Fields are invalid. Main button shows the first field error.
+      return { isReady: false, message: firstFieldErrorMessage || t("genericFormError") };
+    }
+
+    // All checks passed: Pali detected, environment good, fields valid.
+    return { isReady: true, message: "" }; // Ready for submission
+
+  }, [
+    checkEnvironmentReadiness,
+    paliDetected, // from top-level context
+    walletStatus,
+    formState,
+    t,
+    validateSysxFromAccount,
+    validateSyscoinWitnessAddress,
+    validateSysxContract,
+    validateTokenId,
+    validateToSysAmount,
+    setValidationState
+  ]);
 
   // --- Effects ---
-  // Effect for Initial Web3 Setup and Listener Registration
+  // Effect for Environment Readiness Check (and initial field validation)
+  useEffect(() => {
+    if (ethToSysDisplay) {
+      const submissionReadiness = validateForSubmission();
+      setValidationState(prev => ({
+        ...prev,
+        button: {
+          isValid: submissionReadiness.isReady,
+          // Use the message from submissionReadiness
+          message: submissionReadiness.message
+        }
+      }));
+
+      // Initial validation of active fields
+      const fieldsToValidate = ['sysxFromAccount', 'syscoinWitnessAddress'];
+      if (formState.assetType !== 'SYS') fieldsToValidate.push('sysxContract');
+      fieldsToValidate.forEach(name => {
+        runFieldValidation(name, formState[name]);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ethToSysDisplay, walletStatus, formState.assetType, validateForSubmission, runFieldValidation, t]);
+
+
+  // Effect for NEVM Wallet Initialization and Listener Registration
   useEffect(() => {
     let isMounted = true;
-    const initWeb3 = async () => {
+
+    const handleNEVMAccountsChanged = (accounts) => {
+      if (!isMounted) return;
+      const account = accounts?.[0] || null;
+      console.log("NEVM accounts changed:", account);
+      setWalletStatus(prev => ({
+        ...prev,
+        nevm: { ...prev.nevm, account: account }
+      }));
+      // Form field update suggestion handled in render logic based on walletStatus.account vs formState.sysxFromAccount
+    };
+
+    const handleNEVMChainChanged = (chainIdHex) => {
+      if (!isMounted) return;
+      const currentChainIdNum = chainIdHex ? parseInt(chainIdHex, 16) : null;
+      const networkOk = TARGET_NEVM_CHAIN_ID_NUM ? currentChainIdNum === TARGET_NEVM_CHAIN_ID_NUM : true; // Assume ok if no target
+      setWalletStatus(prev => ({
+        ...prev,
+        nevm: { ...prev.nevm, chainId: chainIdHex, networkOk: networkOk }
+      }));
+      if (nevmProviderRef.current) {
+        web3InstanceRef.current = new Web3(nevmProviderRef.current); // Update web3 instance
+      }
+    };
+
+    const initNEVM = async () => {
       try {
-        const detectedProvider = await detectEthereumProvider({ mustBeMetaMask: false, silent: true });
-        if (detectedProvider && isMounted) {
-          providerRef.current = detectedProvider;
-          const web3 = new Web3(detectedProvider);
-          web3InstanceRef.current = web3;
+        const provider = await detectEthereumProvider({ mustBeMetaMask: false, silent: true });
+        if (provider && isMounted) {
+          nevmProviderRef.current = provider;
+          web3InstanceRef.current = new Web3(provider); // Initialize web3 instance
+
           let chainIdHex = null;
+          let accounts = [];
+          let networkOk = false;
+
           try {
-             const chainId = await web3.eth.getChainId();
-             chainIdHex = `0x${chainId.toString(16)}`;
+            chainIdHex = await provider.request({ method: 'eth_chainId' });
+            const currentChainIdNum = chainIdHex ? parseInt(chainIdHex, 16) : null;
+            networkOk = TARGET_NEVM_CHAIN_ID_NUM ? currentChainIdNum === TARGET_NEVM_CHAIN_ID_NUM : true;
           } catch (err) { console.warn("Could not get chain ID on init:", err); }
 
-          if (isMounted) currentChainIdRef.current = chainIdHex; // Update ref if mounted
-          let accounts = [];
           try {
-            accounts = await web3.eth.getAccounts();
-          } catch (err) { console.warn("Could not get accounts on init (maybe locked?):", err); }
+            // Use eth_accounts which returns array or empty array, doesn't prompt
+            accounts = await provider.request({ method: 'eth_accounts' });
+          } catch (err) { console.warn("Could not get accounts on init:", err); }
 
-          if (accounts && accounts.length > 0 && isMounted) {
-            // Track the available NEVM address in a separate state
-            setWalletAddresses(prev => ({ ...prev, nevm: accounts[0] }));
-          } else if (isMounted) {
-            // No accounts available, clear the tracked NEVM address
-            setWalletAddresses(prev => ({ ...prev, nevm: '' }));
+          if (isMounted) {
+            setWalletStatus(prev => ({
+              ...prev,
+              nevm: {
+                detected: true,
+                account: accounts?.[0] || null,
+                chainId: chainIdHex,
+                networkOk: networkOk
+              }
+            }));
 
-            // If form had an address but now none is available, clear it
-            if (formState.sysxFromAccount) {
-              handleAccountsChanged([]);
-            }
-          }
-
-          // Setup listeners
-          if (providerRef.current.on) {
-            providerRef.current.on('accountsChanged', handleAccountsChanged);
-            providerRef.current.on('chainChanged', handleChainChanged);
+            // Setup listeners
+            provider.on('accountsChanged', handleNEVMAccountsChanged);
+            provider.on('chainChanged', handleNEVMChainChanged);
           }
         } else if (isMounted) {
-          console.log('Please install a Web3 provider (e.g., MetaMask).');
-          // Validation will catch providerRef.current being null
+          console.log('NEVM provider not detected.');
+          setWalletStatus(prev => ({ ...prev, nevm: { ...prev.nevm, detected: false } }));
         }
       } catch (error) {
-        console.error("Error initializing Web3:", error);
-        if (isMounted) {
-          // Set a generic error on the button if init fails badly
-          setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("genericError") } }));
-        }
-      } finally {
-         // Run validation after initialization attempt is complete
-         if (isMounted) {
-           validateAllFields();
-         }
+        console.error("Error initializing NEVM Wallet:", error);
+        if (isMounted) setWalletStatus(prev => ({ ...prev, nevm: { ...prev.nevm, detected: false } }));
       }
     };
-    initWeb3();
+
+    initNEVM();
+
     return () => {
       isMounted = false;
-      if (providerRef.current && providerRef.current.removeListener) {
-        providerRef.current.removeListener('accountsChanged', handleAccountsChanged);
-        providerRef.current.removeListener('chainChanged', handleChainChanged);
+      if (nevmProviderRef.current?.removeListener) {
+        nevmProviderRef.current.removeListener('accountsChanged', handleNEVMAccountsChanged);
+        nevmProviderRef.current.removeListener('chainChanged', handleNEVMChainChanged);
       }
     };
-  // Run only on mount and if handlers/t change
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formState.sysxFromAccount, handleAccountsChanged, handleChainChanged, updateNEVMAddress, validateAllFields, t]);
+  }, [ethToSysDisplay]);
 
 
-  // Effect to run validation whenever formState changes or chainId changes (indirectly via re-render)
-  // This replaces the individual useEffects calling validationCheck in the original
+  // Effect for Pali Wallet Initialization and Listener Registration
   useEffect(() => {
-    validateAllFields();
-  }, [formState, validateAllFields, currentChainIdRef.current]); // Re-run validation if form state changes or the validation function changes
+    if (!ethToSysDisplay) {
+      // When hidden, reset our component's utxo state
+      setWalletStatus(prev => ({...prev, utxo: { detected: false, account: null, chainId: null, networkOk: false }}));
+      utxoProviderRef.current = null;
+      return;
+    }
 
+    if (!paliDetected) { // USE the paliDetected from component scope
+      setWalletStatus(prev => ({...prev, utxo: { detected: false, account: null, chainId: null, networkOk: false }}));
+      utxoProviderRef.current = null;
+      return;
+    }
 
+    const pali = window.pali;
 
-  // Effect for Pali Wallet Check
-  useEffect(() => {
-    const checkPali = async () => {
-      if (window.pali && window.pali.isBitcoinBased) {
-        try {
-          const accountInfo = await window.pali.request({ method: 'wallet_getAccount' }).catch(() => null);
+    if (!pali) {
+      console.error("AppContext reported Pali detected, but window.pali is not found.");
+      setWalletStatus(prev => ({...prev, utxo: {...prev.utxo, detected: false}}));
+      utxoProviderRef.current = null;
+      return;
+    }
 
-          if (accountInfo && accountInfo.address) {
-            // Update tracked wallet address state
-            setWalletAddresses(prev => ({ ...prev, pali: accountInfo.address }));
-          } else {
-            // Clear tracked Pali address if disconnected
-            setWalletAddresses(prev => ({ ...prev, pali: '' }));
+    let isMounted = true;
+    utxoProviderRef.current = pali;
 
-            // Clear form field only if it was previously populated
-            if (formState.syscoinWitnessAddress && !accountInfo?.address) {
-              updateUTXOAddress('');
+    // Set detected TRUE in our local state immediately if pali object exists
+    setWalletStatus(prev => ({...prev, utxo: {...prev.utxo, detected: true }}));
+
+    const handleUTXOAccountsChanged = (accounts) => {
+      if (!isMounted) return;
+      // Re-check entire Pali state on account change using the snapshot utility
+      getPaliStateSnapshot(utxoProviderRef.current).then(snapshot => {
+        if (isMounted) {
+          console.log("Pali 'accountsChanged' processed, new snapshot:", snapshot);
+          setWalletStatus(prev => ({
+            ...prev,
+            utxo: {
+              detected: snapshot.isBitcoinBased,
+              account: snapshot.account,
+              chainId: snapshot.chainId,
+              networkOk: snapshot.networkOk
             }
-          }
-        } catch (e) {
-          console.error("Error checking Pali address:", e);
-          setWalletAddresses(prev => ({ ...prev, pali: '' }));
-
-          // Only clear form field if error and field was populated
-          if (formState.syscoinWitnessAddress) {
-            updateUTXOAddress('');
-          }
+          }));
         }
-      } else {
-        // No Pali wallet detected
-        setWalletAddresses(prev => ({ ...prev, pali: '' }));
-
-        // Only clear if field was populated
-        if (formState.syscoinWitnessAddress) {
-          updateUTXOAddress('');
-        }
-      }
+      });
     };
 
-    // Only run check if this component part is displayed
-    if (ethToSysDisplay) {
-      checkPali();
-    }
-  // Dependencies adjusted to include walletAddresses
-  }, [ethToSysDisplay, updateUTXOAddress, formState.syscoinWitnessAddress]);
+    const handleUTXOChainChanged = (chainIdHex) => { // Pali might not always send chainIdHex here for UTXO.
+      if (!isMounted) return;
+      // Re-check entire Pali state on chain change
+      getPaliStateSnapshot(utxoProviderRef.current).then(snapshot => {
+        if (isMounted) {
+          // The snapshot contains the most up-to-date info after a chain change.
+          setWalletStatus(prev => ({
+            ...prev,
+            utxo: {
+              detected: snapshot.isBitcoinBased,
+              account: snapshot.account,
+              chainId: snapshot.chainId,
+              networkOk: snapshot.networkOk
+            }
+          }));
+        }
+      });
+    };
 
+    // Potentially other Pali specific events like '_unlockStateChanged'
+    // const handleUnlockStateChanged = ({ isUnlocked }) => { ... if (isMounted) ... getPaliStateSnapshot ... }
 
+    // Initial state fetch
+    getPaliStateSnapshot(pali).then(initialSnapshot => {
+      if (isMounted) {
+        setWalletStatus(prev => ({
+          ...prev,
+          utxo: {
+            detected: initialSnapshot.isBitcoinBased, // Crucial: only "detected" for UTXO purposes if Bitcoin-based
+            account: initialSnapshot.account,
+            chainId: initialSnapshot.chainId,
+            networkOk: initialSnapshot.networkOk
+          }
+        }));
+      }
+    });
 
-  // --- Transaction Submission (adapted, minimal changes to core logic/messages) ---
+    pali.on('accountsChanged', handleUTXOAccountsChanged);
+    pali.on('chainChanged', handleUTXOChainChanged); // Verify if Pali reliably emits this for UTXO mode with a payload.
+    // pali.on('_unlockStateChanged', handleUnlockStateChanged); // If this event is useful
+
+    return () => {
+      isMounted = false;
+      if (pali?.removeListener) {
+        pali.removeListener('accountsChanged', handleUTXOAccountsChanged);
+        pali.removeListener('chainChanged', handleUTXOChainChanged);
+        // pali.removeListener('_unlockStateChanged', handleUnlockStateChanged);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ethToSysDisplay, getPaliStateSnapshot, paliDetected]);
+
+  // --- Transaction Submission ---
   const freezeBurn = useCallback(async (
     syscoinERC20Manager,
     amountBN,
-    contractAddress, // Use local names for clarity
+    contractAddress,
     nftId,
     witnessAddress,
     nevFromAccount
   ) => {
-    // Set working state and initial message
-    setFormState(prev => ({ ...prev, working: true }));
-    setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step2PleaseSign") }}));
+    // Caller (checkAllowanceTxStatus or submitProofs) should have set working: true
+    // and an appropriate "Please sign..." message for freezeBurn.
+    setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3AuthAllowanceMetamask") } }));
+    setFormState(prev => ({ ...prev, working: true })); // Ensure working is true
 
-    const txValue = (formState.assetType === 'SYS') ? amountBN : undefined;
-    const contractAddrToSend = contractAddress || ZERO_ADDRESS;
-    const tokenIdToSend = nftId || 0;
+    const web3 = web3InstanceRef.current;
+    if (!web3) {
+      setFormState(prev => ({ ...prev, working: false }));
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3InstallMetamask") } }));
+      return;
+    }
+    if (!nevmProviderRef.current || typeof nevmProviderRef.current.request !== 'function') {
+      setFormState(prev => ({ ...prev, working: false }));
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("genericError") } }));
+      return;
+    }
+
     const amountString = amountBN.toString();
+    const contractAddrToSend = contractAddress || ZERO_ADDRESS;
+    const tokenIdToSend = nftId || "0";
+
+    let valueForEstimateGas;
+    let valueForSendTx;
+
+    if (formState.assetType === 'SYS' && amountBN) {
+      valueForEstimateGas = amountBN.toString();
+      valueForSendTx = web3.utils.toHex(amountBN);
+    } else {
+      valueForEstimateGas = "0";
+      valueForSendTx = "0x0";
+    }
 
     try {
-      // Use estimated gas + buffer
+      const encodedData = syscoinERC20Manager.methods
+        .freezeBurn(amountString, contractAddrToSend, tokenIdToSend, witnessAddress)
+        .encodeABI();
+
       const gasEstimate = await syscoinERC20Manager.methods
         .freezeBurn(amountString, contractAddrToSend, tokenIdToSend, witnessAddress)
-        .estimateGas({ from: nevFromAccount, value: txValue });
-      const gasLimit = Math.ceil(gasEstimate * 1.2); // 20% buffer is reasonable
+        .estimateGas({ from: nevFromAccount, value: valueForEstimateGas });
+      const gasLimit = Math.ceil(gasEstimate * 1.2);
 
-      syscoinERC20Manager.methods
-        .freezeBurn(amountString, contractAddrToSend, tokenIdToSend, witnessAddress)
-        .send({ from: nevFromAccount, gas: gasLimit, value: txValue, transactionPollingTimeout: 1800 }) // Keep timeout
-        .once("transactionHash", (hash) => {
-          console.log("Transaction Hash:", hash);
-          // Don't set working: false yet
-          updateFormField('receiptTxHash', hash); // Persists and updates state
-          setValidationState(prev => ({...prev, button: { isValid: false, message: t("step3ReceiptTxHash") + ": " + hash }}));
+      const txParams = {
+        from: nevFromAccount,
+        to: CONFIGURATION.ERC20Manager,
+        data: encodedData,
+        gas: web3.utils.toHex(gasLimit),
+        value: valueForSendTx,
+      };
 
-          if (jumpToStep) {
-            jumpToStep(1); // Navigate away
-          } else {
-             console.warn("jumpToStep function not provided");
-             // Button message already set
-          }
-        })
-        .on("error", (error) => {
-          console.error("Freeze/Burn Error:", error);
-          setFormState(prev => ({ ...prev, working: false }));
-          let message = error.message || t("genericError");
-          if (message.length <= 512 && message.indexOf("{") !== -1) {
-            try {
-              const nestedError = JSON.parse(message.substring(message.indexOf("{")));
-              message = nestedError.message || message;
-            } catch (e) {/* ignore */}
-          }
-          let finalButtonMsg;
-          if (message.indexOf("might still be mined") === -1 && message.indexOf("transactionPollingTimeout") === -1) {
-             finalButtonMsg = t("genericError") + message.substring(0, 100) + (message.length > 100 ? "..." : "");
-             // Clear receipt hash only on non-timeout errors where it wasn't set yet or should be cleared
-             updateFormField('receiptTxHash', '');
-          } else {
-             // Keep the existing receipt hash from formState if available for timeout message
-             finalButtonMsg = "Transaction timed out. Check explorer: " + formState.receiptTxHash;
-             // Don't clear receipt hash on timeout
-          }
-           setValidationState(prev => ({...prev, button: { isValid: false, message: finalButtonMsg }}));
-        });
+      const txHash = await nevmProviderRef.current.request({
+        method: 'eth_sendTransaction',
+        params: [txParams],
+      });
+
+      updateFormField('receiptTxHash', txHash); // Main receipt hash for Step 2
+      setValidationState(prev => ({...prev, button: { isValid: false, message: t("step3ReceiptTxHash") + ": " + txHash.substring(0,10) + "..." }}));
+
+      // Clear allowance-specific items from localStorage as we are moving on
+      if(storageExists) {
+        localStorage.removeItem("allowanceTxHash_ethToSys");
+        localStorage.removeItem("isPollingAllowance_ethToSys");
+      }
+      // Also clear from component state if needed, though navigation will reset
+      setFormState(prev => ({...prev, allowanceTxHash: "", isPollingAllowance: false}));
+
+      if (jumpToStep) {
+        jumpToStep(1);
+      } else {
+        console.warn("jumpToStep function not provided, tx submitted.");
+        setFormState(prev => ({ ...prev, working: false }));
+      }
     } catch (err) {
-      console.error("Error estimating gas or sending transaction:", err);
+      console.error("Error in freezeBurn process:", err);
       setFormState(prev => ({ ...prev, working: false }));
-      let errorMsg = t("genericError") + (err.message || "Please try again...");
-      // Clear receipt hash on estimation/send error
+      let message = err.message || t("genericError");
+      if (err.code === 4001) { message = t("userRejectedTransaction") || "User rejected transaction.";  }
+
       updateFormField('receiptTxHash', '');
-      setValidationState(prev => ({ ...prev, button: { isValid: false, message: errorMsg } }));
+      setValidationState(prev => ({...prev, button: { isValid: false, message: (t("genericError") + ": " + message).substring(0,100) }}));
     }
-  // Dependencies reflect used state/props/functions
-  }, [formState.assetType, formState.receiptTxHash, t, updateFormField, jumpToStep]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formState.assetType, t, updateFormField, jumpToStep]);
+
+  const checkAllowanceTxStatus = useCallback(async () => {
+    if (!formState.allowanceTxHash || !web3InstanceRef.current) {
+      console.warn("checkAllowanceTxStatus: Pre-conditions not met (no allowanceTxHash or web3 instance). Stopping poll.");
+      if (allowancePollIntervalIdRef.current) clearInterval(allowancePollIntervalIdRef.current);
+      allowancePollIntervalIdRef.current = null;
+      setFormState(prev => ({ ...prev, isPollingAllowance: false, working: false }));
+      if(storageExists) localStorage.setItem("isPollingAllowance_ethToSys", "false");
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("genericError") } }));
+      return;
+    }
+
+    // The button message should already reflect polling from initiateAllowanceTransaction or useEffect
+    // Ensure 'working' is true to keep button visually active/disabled
+    setFormState(prev => ({ ...prev, working: true }));
+
+    try {
+      const receipt = await web3InstanceRef.current.eth.getTransactionReceipt(formState.allowanceTxHash);
+
+      if (receipt) { // Receipt found
+        if (allowancePollIntervalIdRef.current) {
+          clearInterval(allowancePollIntervalIdRef.current);
+          allowancePollIntervalIdRef.current = null;
+        }
+        // Persist that polling is no longer active for this hash
+        if (storageExists) {
+          localStorage.setItem("isPollingAllowance_ethToSys", "false");
+          // We can keep allowanceTxHash in localStorage for informational purposes or clear it.
+          // Clearing it means if freezeBurn fails later, a new allowance might be requested unnecessarily.
+          // Let's keep it for now, it will be overwritten by a new attempt.
+        }
+
+        setFormState(prev => ({ ...prev, isPollingAllowance: false })); // Update state: polling stopped
+
+        if (receipt.status === true || receipt.status === 1 || receipt.status === '0x1') {
+          console.log("Allowance transaction successful:", receipt);
+          setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step1AllowanceSuccess") } }));
+
+          const web3 = web3InstanceRef.current;
+          const BN = web3.utils.BN;
+          let decimals; // Declare decimals
+
+          // Correctly determine decimals based on assetType
+          if (formState.assetType === 'ERC20' && formState.sysxContract) {
+            // We need a contract instance to call decimals()
+            // The ABI for SyscoinERC20I should be suitable for a standard decimals() call.
+            const tokenContractForDecimals = new web3.eth.Contract(assetabierc20, formState.sysxContract);
+            try {
+              decimals = await tokenContractForDecimals.methods.decimals().call();
+              decimals = parseInt(decimals.toString(), 10); // Ensure it's a number
+            } catch (e) {
+              console.warn("checkAllowanceTxStatus: Could not fetch decimals for ERC20, assuming 18.", e);
+              decimals = 18; // Fallback if decimals() call fails
+            }
+          } else if (formState.assetType === 'ERC721' || formState.assetType === 'ERC1155') {
+            decimals = 0; // NFTs: amount is typically 1, so 0 decimals for toBaseUnit
+          } else { // For 'SYS' or other types if any (though SYS won't use contractBase here)
+            decimals = 18; // Default for SYS
+          }
+
+          const syscoinERC20Manager = new web3.eth.Contract(erc20Managerabi, CONFIGURATION.ERC20Manager);
+          const amountBNValue = (formState.assetType === 'ERC721') // For ERC721, amount is always 1
+            ? new BN(1)
+            : toBaseUnit(formState.toSysAmount, decimals, BN); // Use the determined decimals
+
+          const nftIdValue = (formState.assetType === 'ERC721' || formState.assetType === 'ERC1155') ? formState.tokenId : '0';
+
+          if (amountBNValue === undefined || amountBNValue.lt(new BN(0))) {
+            setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step2Amount") }}));
+            setFormState(prev => ({ ...prev, working: false })); // Allow retry
+            return;
+          }
+          await freezeBurn(syscoinERC20Manager, amountBNValue, formState.sysxContract, nftIdValue, formState.syscoinWitnessAddress, formState.sysxFromAccount);
+
+        } else { // Allowance TX FAILED on-chain
+          console.error("Allowance transaction failed on-chain:", receipt);
+          setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("genericError") } }));
+          setFormState(prev => ({ ...prev, working: false })); // Re-enable main button for retry
+        }
+      } else {
+        // Receipt not yet available, still pending. Polling continues.
+        // Message should reflect ongoing polling, set by initiateAllowance or useEffect.
+        setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3PleaseWait") } }));
+      }
+    } catch (error) {
+      console.error("Error in checkAllowanceTxStatus fetching receipt:", error);
+      // Potentially an RPC error. Keep polling for a while.
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3PleaseWait") } }));
+      // formState.working remains true, interval continues.
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formState.allowanceTxHash, formState.assetType, formState.sysxContract, formState.sysxFromAccount, formState.toSysAmount, formState.tokenId, freezeBurn, t]);
+
+  // Effect for Managing Allowance Polling Interval
+  useEffect(() => {
+    // Only run if the component is displayed and we are supposed to be polling
+    if (ethToSysDisplay && formState.isPollingAllowance && formState.allowanceTxHash) {
+      // If an interval isn't already running for this polling session, start it.
+      if (!allowancePollIntervalIdRef.current) {
+        // Call once immediately to check status without waiting for the first interval
+        checkAllowanceTxStatus();
+
+        // Then set up the interval for subsequent checks
+        allowancePollIntervalIdRef.current = setInterval(checkAllowanceTxStatus, 15000);
+
+        // Update UI to reflect polling status if not already optimally set
+        setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3PleaseWait") } }));
+        setFormState(prev => ({ ...prev, working: true })); // Ensure button is disabled
+      }
+    } else if ((!formState.isPollingAllowance || !ethToSysDisplay) && allowancePollIntervalIdRef.current) {
+      // If we are no longer supposed to be polling OR component is not displayed,
+      // and an interval is running, clear it.
+      console.log("useEffect: Stopping polling interval. isPolling:", formState.isPollingAllowance, "display:", ethToSysDisplay);
+      clearInterval(allowancePollIntervalIdRef.current);
+      allowancePollIntervalIdRef.current = null;
+      // If polling was stopped because it's done (not just navigating away), ensure 'working' is false
+      if (!formState.isPollingAllowance && formState.working) {
+        // Check if message indicates success/failure already, otherwise set a general one or leave as is
+        // This might already be handled by checkAllowanceTxStatus, this is a fallback.
+        // if (!validationState.button.message.includes("granted") && !validationState.button.message.includes("failed")) {
+        //   setValidationState(prev => ({ ...prev, button: { isValid: true, message: t("step1ESButton") }})); // Or an appropriate "ready" message
+        // }
+        // setFormState(prev => ({...prev, working: false})); // This should be handled by the functions that stop polling
+      }
+    }
+
+    // Cleanup function for when the component unmounts
+    return () => {
+      if (allowancePollIntervalIdRef.current) {
+        console.log("useEffect cleanup (unmount): Clearing allowance poll interval ID:", allowancePollIntervalIdRef.current);
+        clearInterval(allowancePollIntervalIdRef.current);
+        allowancePollIntervalIdRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ethToSysDisplay, formState.isPollingAllowance, formState.allowanceTxHash, checkAllowanceTxStatus]);
 
   const submitProofs = useCallback(async () => {
-    // Re-run validation and check button state directly
-    const fieldsAreValid = validateAllFields(); // This updates validationState
-    if (!fieldsAreValid) {
-      // Message should already be set by validateAllFields
-      console.warn("Submission attempt with invalid fields.");
-      if (!validationState.button.message) { // Safety check for message
-         setValidationState(prev => ({ ...prev, button: { ...prev.button, isValid: false, message: t("genericError") } }));
+    const submissionReadiness = validateForSubmission();
+    if (!submissionReadiness.isReady) {
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: submissionReadiness.message } }));
+      if (paliDetected && walletStatus.utxo.detected && !walletStatus.utxo.account && submissionReadiness.message === t("step2UnlockPali")) {
+        await connectPaliWallet();
       }
       return;
     }
 
-    if (!web3InstanceRef.current || !providerRef.current) {
-      // This case should be caught by validateAllFields, but double-check
-      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3InstallMetamask") } }));
-      return;
-    }
+    setFormState(prev => ({ ...prev, working: true }));
+    setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step1CheckingAllowance") } }));
 
     const web3 = web3InstanceRef.current;
+    if (!web3 || !nevmProviderRef.current) {
+      setFormState(prev => ({...prev, working: false }));
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3InstallMetamask") }}));
+      return;
+    }
     const BN = web3.utils.BN;
 
-    setFormState(prev => ({ ...prev, working: true }));
-    setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3AuthMetamask") } }));
-
-    // --- Chain Check ---
-    // The validation already checked the chain, proceed assuming it's correct or user handles it.
-    // If we wanted to add switching, it would go here, but per the request, we avoid functional changes.
-
-    // --- Transaction Preparation ---
-    setValidationState(prev => ({ ...prev, button: { isValid: false, message: "Preparing Transaction..." } })); // Use a generic message
-
     let assetABI;
-    let decimals = 18; // Default
+    let decimals = 18;
     switch (formState.assetType) {
       case 'ERC721': assetABI = assetabierc721; decimals = 0; break;
-      case 'ERC1155': assetABI = assetabierc1155; decimals = 0; break; // Assuming 0 decimals
+      case 'ERC1155': assetABI = assetabierc1155; decimals = 0; break;
       case 'ERC20': assetABI = assetabierc20; break;
-      default: assetABI = assetabierc20; // Fallback (for SYS, though ABI isn't used)
+      default: assetABI = assetabierc20;
     }
-
     const syscoinERC20Manager = new web3.eth.Contract(erc20Managerabi, CONFIGURATION.ERC20Manager);
     let contractBase = null;
-    let amountBN;
-    const nftId = (formState.assetType === 'ERC721' || formState.assetType === 'ERC1155') ? formState.tokenId : '0';
+    const nftIdValue = (formState.assetType === 'ERC721' || formState.assetType === 'ERC1155') ? formState.tokenId : '0';
 
     try {
-      // Determine amount and setup contractBase if needed
       if (formState.assetType !== 'SYS' && formState.sysxContract) {
         contractBase = new web3.eth.Contract(assetABI, formState.sysxContract);
         if (formState.assetType === 'ERC20') {
@@ -720,89 +1060,72 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
           catch (e) { console.warn("Could not fetch decimals for ERC20, assuming 18.", e); decimals = 18; }
         }
       }
-
-      // Calculate amountBN based on type (after potentially fetching decimals)
-      amountBN = (formState.assetType === 'ERC721')
+      const amountBNValue = (formState.assetType === 'ERC721')
         ? new BN(1)
-        : toBaseUnit(formState.toSysAmount, decimals, BN); // Use determined/default decimals
+        : toBaseUnit(formState.toSysAmount, decimals, BN);
 
-      // Check amount during submission trigger.
-      // A more robust check is in validateField.
-      if (amountBN === undefined) {
-         // This case should ideally be caught by validation
-         console.error("Invalid amount provided during submission.");
-         // Set validation state for amount and button
-         setValidationState(prev => ({
-           ...prev,
-           toSysAmount: { isValid: false, message: t("step2Amount")},
-           button: { isValid: false, message: t("step2Amount")}
-         }));
-         setFormState(prev => ({ ...prev, working: false }));
-         return;
+      if (amountBNValue === undefined || amountBNValue.lt(new BN(0))) {
+        setValidationState(prev => ({ ...prev, toSysAmount: { isValid: false, message: t("step2Amount")}, button: { isValid: false, message: t("step2Amount")}}));
+        setFormState(prev => ({ ...prev, working: false }));
+        return;
       }
 
-
-      // --- Approval Logic ---
+      let needsAllowanceTx = false;
       if (formState.assetType === 'ERC20' && contractBase) {
-        setValidationState(prev => ({ ...prev, button: { isValid: false, message: "Checking allowance..." } }));
-        const allowance = await contractBase.methods.allowance(formState.sysxFromAccount, CONFIGURATION.ERC20Manager).call();
-        const allowanceBN = new BN(allowance.toString());
-
-        if (allowanceBN.lt(amountBN)) {
-          setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3AuthAllowanceMetamask") } }));
-          await contractBase.methods.approve(CONFIGURATION.ERC20Manager, amountBN.toString())
-            .send({ from: formState.sysxFromAccount, gas: 100000 })
-            .on("transactionHash", (hash) => {
-              setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3AuthAllowanceMetamask") } }));
-            })
-            .on("receipt", (receipt) => {
-               setValidationState(prev => ({ ...prev, button: { isValid: false, message: "Approval successful! Proceeding..." } })); // This seems like a reasonable interim message.
-              freezeBurn(syscoinERC20Manager, amountBN, formState.sysxContract, nftId, formState.syscoinWitnessAddress, formState.sysxFromAccount);
-            })
-            .on("error", (error, receipt) => { throw new Error("Approval failed: " + (error.message || "User rejected")); });
-          return; // Wait for approval
-        }
+        const currentAllowance = await contractBase.methods.allowance(formState.sysxFromAccount, CONFIGURATION.ERC20Manager).call();
+        if (new BN(currentAllowance.toString()).lt(amountBNValue)) { needsAllowanceTx = true; }
       } else if ((formState.assetType === 'ERC721' || formState.assetType === 'ERC1155') && contractBase) {
-        setValidationState(prev => ({ ...prev, button: { isValid: false, message: "Checking NFT approval..." } })); // Interim message
         const isApproved = await contractBase.methods.isApprovedForAll(formState.sysxFromAccount, CONFIGURATION.ERC20Manager).call();
-        if (!isApproved) {
-          setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3AuthAllowanceMetamask") } }));
-          await contractBase.methods.setApprovalForAll(CONFIGURATION.ERC20Manager, true)
-            .send({ from: formState.sysxFromAccount, gas: 100000 })
-            .on("transactionHash", (hash) => {
-               setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step3AuthAllowanceMetamask") } }));
-            })
-            .on("receipt", (receipt) => {
-              setValidationState(prev => ({ ...prev, button: { isValid: false, message: "NFT Approval successful! Proceeding..." } })); // Interim message
-              freezeBurn(syscoinERC20Manager, amountBN, formState.sysxContract, nftId, formState.syscoinWitnessAddress, formState.sysxFromAccount);
-            })
-            .on("error", (error, receipt) => { throw new Error("NFT Approval failed: " + (error.message || "User rejected")); });
-          return; // Wait for approval
-        }
+        if (!isApproved) { needsAllowanceTx = true; }
       }
 
-      // --- Call freezeBurn directly if no approval needed ---
-      freezeBurn(syscoinERC20Manager, amountBN, formState.sysxContract, nftId, formState.syscoinWitnessAddress, formState.sysxFromAccount);
+      if (needsAllowanceTx) {
+        // If we are already polling a previous allowance attempt, the useEffect will handle it.
+        // The button message will reflect this. User just waits.
+        if (formState.isPollingAllowance && formState.allowanceTxHash) {
+          console.log("submitProofs: Already polling an allowance transaction:", formState.allowanceTxHash);
+          setValidationState(prev => ({ ...prev, button: { isValid: false, message: t("step1CheckingAllowance") } }));
+          // working: true is already set. The useEffect manages the interval.
+        } else {
+            // Not polling, or previous poll failed. Initiate a new allowance transaction.
+            const methodName = (formState.assetType === 'ERC20') ? "approve" : "setApprovalForAll";
+            const methodArgs = (formState.assetType === 'ERC20')
+              ? [CONFIGURATION.ERC20Manager, amountBNValue.toString()]
+              : [CONFIGURATION.ERC20Manager, true];
+            await initiateAllowanceTransaction(contractBase, methodName, methodArgs);
+            // initiateAllowanceTransaction sets isPollingAllowance=true, useEffect will start the interval.
+        }
+      } else { // No allowance transaction needed
+        setValidationState(prev => ({ ...prev, button: { isValid: false, message: "" } }));
+        await freezeBurn(syscoinERC20Manager, amountBNValue, formState.sysxContract, nftIdValue, formState.syscoinWitnessAddress, formState.sysxFromAccount);
+      }
 
     } catch (error) {
-      console.error("Error during approval check or execution:", error);
-      setFormState(prev => ({ ...prev, working: false }));
-      let errorMsg = t("genericError") + (error.message || "Please try again...");
-      updateFormField('receiptTxHash', ''); // Clear hash on error
-      setValidationState(prev => ({ ...prev, button: { isValid: false, message: errorMsg } }));
+      console.error("Error in submitProofs orchestration:", error);
+      setFormState(prev => ({ ...prev, working: false, isPollingAllowance: false }));
+      let errorMsg = error.message || t("genericError");
+      if (error.code === 4001) { errorMsg = t("step2PleaseSign"); }
+      updateFormField('receiptTxHash', '');
+      setValidationState(prev => ({ ...prev, button: { isValid: false, message: errorMsg.substring(0,150) } }));
     }
-  // Dependencies reflect state/props/functions used
-  }, [validateAllFields, validationState.button.message, t, providerRef, formState, toBaseUnit, freezeBurn, updateFormField]); // Added missing deps like providerRef
-
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    validateForSubmission, connectPaliWallet, walletStatus.utxo, t,
+    formState, // Includes all sub-fields. Be specific if perf is an issue.
+    initiateAllowanceTransaction,
+    freezeBurn,
+    updateFormField
+  ]);
 
   // --- Render Logic ---
-  // Extract CSS Class Generation (using the helper function)
+  // getValidationClasses helper remains the same (assuming it produces correct classes)
+  // fieldClasses derivation remains the same (deriving from validationState)
   const fieldClasses = {
     button: getValidationClasses(
-    validationState.button.isValid,
-    !!validationState.button.message,
-    formState.working,
-    true // isButton = true
+      validationState.button.isValid,
+      !!validationState.button.message,
+      formState.working,
+      true
     ),
     toSysAmount: getValidationClasses(validationState.toSysAmount.isValid),
     syscoinWitnessAddress: getValidationClasses(validationState.syscoinWitnessAddress.isValid),
@@ -810,6 +1133,18 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
     tokenId: getValidationClasses(validationState.tokenId.isValid),
     sysxContract: getValidationClasses(validationState.sysxContract.isValid),
   };
+
+  // Function to handle filling address from wallet
+  const fillAddressFromWallet = useCallback((fieldType) => {
+    if (fieldType === 'nevm' && walletStatus.nevm.account) {
+      updateFormField('sysxFromAccount', walletStatus.nevm.account);
+      runFieldValidation('sysxFromAccount', walletStatus.nevm.account); // Validate after fill
+    } else if (fieldType === 'utxo' && walletStatus.utxo.account) {
+      updateFormField('syscoinWitnessAddress', walletStatus.utxo.account);
+      runFieldValidation('syscoinWitnessAddress', walletStatus.utxo.account); // Validate after fill
+    }
+  }, [walletStatus, updateFormField, runFieldValidation]);
+
 
   return (
     <div className="step step1es">
@@ -850,7 +1185,7 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
           <label className="control-label col-md-4">
             {t("step1ESSYSXContractLabel")}
           </label>
-          {/* Apply classes directly */}
+          {/* Apply classes to the direct wrapper div */}
           <div className={fieldClasses.sysxContract.mainCls}>
             <input
             name="sysxContract"
@@ -863,7 +1198,7 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
             />
             {/* Tooltip div */}
             <div className={fieldClasses.sysxContract.valGrpCls}>
-            {validationState.sysxContract.message}
+              {validationState.sysxContract.message}
             </div>
           </div>
           </div>
@@ -886,8 +1221,9 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
             onChange={handleInputChange}
             disabled={formState.working}
             />
+            {/* Tooltip div */}
             <div className={fieldClasses.tokenId.valGrpCls}>
-            {validationState.tokenId.message}
+              {validationState.tokenId.message}
             </div>
           </div>
           </div>
@@ -898,54 +1234,57 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
         <div className="row">
         <div className="col-md-12">
           <label className="control-label col-md-4">
-          {t("step1ESFromAccountLabel")}
+            {t("step1ESFromAccountLabel")}
           </label>
           <div className={fieldClasses.sysxFromAccount.mainCls}>
-          <input
-            name="sysxFromAccount"
-            autoComplete="off"
-            type="text"
-            placeholder={t("step1ESEnterFromAccount")}
-            className="form-control"
-            value={formState.sysxFromAccount}
-            onChange={handleInputChange}
-            disabled={formState.working}
-          />
-
-          {/* Suggestion button for NEVM - prioritizing different states */}
-          {formState.sysxFromAccount.toLowerCase() === walletAddresses.nevm.toLowerCase() ? (
-            <span></span>
-          ) : walletAddresses.nevm ? (
-            // If wallet is connected but input has different/no address
-            <button
-              type="button"
-              onClick={() => updateNEVMAddress(walletAddresses.nevm)}
-              className="btn btn-default wallet-connect-btn"
+            <input
+              name="sysxFromAccount"
+              autoComplete="off"
+              type="text"
+              placeholder={t("step1ESEnterFromAccount")}
+              className="form-control"
+              value={formState.sysxFromAccount}
+              onChange={handleInputChange}
               disabled={formState.working}
-            >
-              <span className="wallet-icon"></span>
-              {walletAddresses.nevm.substring(0, 6)}...{walletAddresses.nevm.substring(38)}
-            </button>
-          ) : providerRef.current ? (
-            // If provider exists but no wallet connected
-            <button
-              type="button"
-              onClick={() => connectNEVMWallet(providerRef.current)}
-              className="btn btn-default wallet-connect-btn"
-              disabled={formState.working}
-            >
-              <span className="wallet-icon"></span>
-              {t("connectNEVMWallet")}
-            </button>
-          ) : (
-            // If no provider detected
-            <div className="wallet-notice">{t("step3InstallMetamask")}</div>
-          )}
+            />
 
-          {/* Tooltip Div */}
-          <div className={fieldClasses.sysxFromAccount.valGrpCls}>
-            {validationState.sysxFromAccount.message}
-          </div>
+            {walletStatus.nevm.account && formState.sysxFromAccount.toLowerCase() !== walletStatus.nevm.account.toLowerCase() ? (
+              // Wallet connected with account, different from input -> Show suggestion button
+              <button
+                type="button"
+                onClick={() => fillAddressFromWallet('nevm')} // Use NEW handler
+                className="btn btn-default wallet-connect-btn"
+                disabled={formState.working}
+              >
+                <span className="wallet-icon"></span>
+                {/* Display address from walletStatus */}
+                {walletStatus.nevm.account.substring(0, 6)}...{walletStatus.nevm.account.substring(38)}
+              </button>
+            ) : !walletStatus.nevm.account && walletStatus.nevm.detected ? (
+              // Wallet detected, but no account connected -> Show connect button
+              <button
+                type="button"
+                // Call connectNEVMWallet directly, provider ref is available
+                onClick={() => connectNEVMWallet(nevmProviderRef.current)}
+                className="btn btn-default wallet-connect-btn"
+                disabled={formState.working}
+              >
+                <span className="wallet-icon"></span>
+                {t("connectNEVMWallet")}
+              </button>
+            ) : !walletStatus.nevm.detected ? (
+              // No provider detected -> Show install message
+              <div className="wallet-notice">{t("step3InstallMetamask")}</div>
+            ) : (
+              // Account matches input, or wallet not detected and no account -> Render nothing extra
+              <span></span>
+            )}
+
+
+            {/* Tooltip Div */}
+            <div className={fieldClasses.sysxFromAccount.valGrpCls}>
+              {validationState.sysxFromAccount.message}
+            </div>
           </div>
         </div>
         </div>
@@ -959,20 +1298,25 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
           </label>
           <div className={fieldClasses.toSysAmount.mainCls}>
             <input
-            name="toSysAmount"
-            autoComplete="off"
-            type="number"
-            min="0" step="any"
-            placeholder={t("step2EnterAmount")}
-            className="form-control"
-            required
-            value={formState.toSysAmount}
-            onChange={handleInputChange}
-            disabled={formState.working || formState.assetType === 'ERC721'}
+              name="toSysAmount"
+              autoComplete="off"
+              type="number"
+              min="0" step="any"
+              placeholder={t("step2EnterAmount")}
+              className="form-control"
+              required
+              value={formState.toSysAmount}
+              onChange={handleInputChange}
+              disabled={formState.working || formState.assetType === 'ERC721'}
             />
+            {/* Tooltip div */}
+            {validationState.toSysAmount.message ? (
             <div className={fieldClasses.toSysAmount.valGrpCls}>
-            {validationState.toSysAmount.message}
+              {validationState.toSysAmount.message}
             </div>
+            ) : (
+              <span></span>
+            )}
           </div>
           </div>
         </div>
@@ -982,54 +1326,61 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
         <div className="row">
         <div className="col-md-12">
           <label className="control-label col-md-4">
-          {t("step1ESWitnessAddressLabel")}
+            {t("step1ESWitnessAddressLabel")}
           </label>
           <div className={fieldClasses.syscoinWitnessAddress.mainCls}>
-          <input
-            name="syscoinWitnessAddress"
-            autoComplete="off"
-            type="text"
-            placeholder={t("step1ESEnterWitnessAddress")}
-            className="form-control"
-            required
-            value={formState.syscoinWitnessAddress}
-            onChange={handleInputChange}
-            disabled={formState.working}
-          />
-
-          {/* Suggestion button when Pali wallet address is available but not used */}
-          {formState.syscoinWitnessAddress.toLowerCase() === walletAddresses.pali.toLowerCase() ? (
-            <span></span>
-          ) : walletAddresses.pali ? (
-            // If wallet is connected but input has different/no address
-            <button
-              type="button"
-              onClick={() => updateUTXOAddress(walletAddresses.pali)}
-              className="btn btn-default wallet-connect-btn"
+            <input
+              name="syscoinWitnessAddress"
+              autoComplete="off"
+              type="text"
+              placeholder={t("step1ESEnterWitnessAddress")}
+              className="form-control"
+              required
+              value={formState.syscoinWitnessAddress}
+              onChange={handleInputChange}
               disabled={formState.working}
-            >
-              <span className="wallet-icon"></span>
-              {walletAddresses.pali.substring(0, 6)}...{walletAddresses.pali.substring(39)}
-            </button>
-          ) : window.pali ? (
-            // If Pali is available but not connected
-            <button
-              type="button"
-              onClick={connectPaliWallet}
-              className="btn btn-default wallet-connect-btn"
-              disabled={formState.working}
-            >
-              <span className="wallet-icon"></span>
-              {t("connectPaliWallet")}
-            </button>
-          ) : (
-            // If Pali is not available
-            <div className="wallet-notice">{t("step2InstallPali")}</div>
-          )}
+            />
 
-          <div className={fieldClasses.syscoinWitnessAddress.valGrpCls}>
-            {validationState.syscoinWitnessAddress.message}
-          </div>
+            {walletStatus.utxo.account && formState.syscoinWitnessAddress.toLowerCase() !== walletStatus.utxo.account.toLowerCase() && walletStatus.utxo.networkOk ? (
+              // Wallet connected with account, different from input -> Show suggestion button
+              <button
+                type="button"
+                onClick={() => fillAddressFromWallet('utxo')} // Use NEW handler
+                className="btn btn-default wallet-connect-btn"
+                disabled={formState.working}
+              >
+                <span className="wallet-icon"></span>
+                {/* Display address from walletStatus - adjust substring length */}
+                {walletStatus.utxo.account.substring(0, 6)}...{walletStatus.utxo.account.substring(walletStatus.utxo.account.length - 4)}
+              </button>
+            ) : !walletStatus.utxo.account && walletStatus.utxo.detected ? (
+              // Wallet detected, but no account connected -> Show connect button
+              <button
+                type="button"
+                onClick={connectPaliWallet}
+                className="btn btn-default wallet-connect-btn"
+                disabled={formState.working}
+              >
+                <span className="wallet-icon"></span>
+                {t("step2SwitchUTXONetwork")}
+              </button>
+            ) : !walletStatus.utxo.detected ? (
+              // No provider detected -> Show install message
+              <div className="wallet-notice">{t("step2InstallPali")}</div>
+            ) : (
+              // Account matches input, or wallet not detected and no account -> Render nothing extra
+              <span></span>
+            )}
+
+
+            {/* Tooltip div */}
+            {validationState.syscoinWitnessAddress.message ? (
+            <div className={fieldClasses.syscoinWitnessAddress.valGrpCls}>
+              {validationState.syscoinWitnessAddress.message}
+            </div>
+            ) : (
+              <span></span>
+            )}
           </div>
         </div>
         </div>
@@ -1038,22 +1389,25 @@ const Step1ES = ({ getStore, updateStore, jumpToStep, t }) => {
         <div className="row">
         <div className="col-md-4 col-sm-12 col-centered">
           <div className={fieldClasses.button.buttonCls}>
-          <button
-            disabled={formState.working || !validationState.button.isValid}
-            type="button"
-            className="form-control btn btn-default formbtn"
-            aria-label={t("step1ESButton")}
-            onClick={submitProofs}
-          >
-            {formState.working ? (
-             <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> {t("working")}</>
-            ) : (
-             <><span className="glyphicon glyphicon-send" aria-hidden="true">&nbsp;</span>{t("step1ESButton")}</>
-            )}
-          </button>
-          <div className={fieldClasses.button.buttonValGrpCls} style={{ display: validationState.button.message ? 'block' : 'none' }}>
-            {validationState.button.message}
-          </div>
+            <button
+              disabled={formState.working || !validationState.button.isValid}
+              type="button"
+              className="form-control btn btn-default formbtn"
+              aria-label={t("step1ESButton")}
+              onClick={submitProofs}
+            >
+              {formState.working ? (
+                <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> {t("step1ESButton")}</>
+              ) : (
+                <><span className="glyphicon glyphicon-send" aria-hidden="true"></span> {t("step1ESButton")}</>
+              )}
+            </button>
+            <div
+              className={fieldClasses.button.buttonValGrpCls} // Uses derived class
+              style={{ display: validationState.button.message ? 'block' : 'none' }}
+            >
+              {validationState.button.message}
+            </div>
           </div>
         </div>
         </div>
