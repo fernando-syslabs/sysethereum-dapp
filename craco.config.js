@@ -1,5 +1,7 @@
+require('dotenv').config();
 const webpack = require('webpack');
 const NodePolyfillPlugin = require('node-polyfill-webpack-plugin'); // npm i -D node-polyfill-webpack-plugin
+const port = process.env.PORT || 3000;
 
 module.exports = {
   webpack: {
