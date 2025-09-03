@@ -2,6 +2,9 @@
   "name": "sysethereum-dapp",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "@craco/craco": "^7.1.0",
     "@metamask/detect-provider": "^1.2.0",
