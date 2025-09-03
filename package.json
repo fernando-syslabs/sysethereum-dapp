@@ -12,19 +12,16 @@
     "axios": "^0.18.1",
     "bitcoin-proof": "^2.0.0",
     "buffer": "^6.0.3",
-    "constants-browserify": "^1.0.0",
-    "crypto-browserify": "^3.12.1",
     "i18next": "^12.0.0",
     "i18next-browser-languagedetector": "^2.2.3",
     "joi": "^10.2.2",
     "joi-validation-strategy": "^0.3.3",
     "material-icons-react": "^1.0.4",
-    "path-browserify": "^1.0.1",
     "process": "^0.11.10",
-    "react": "^16.11.0",
+    "react": "^18.2.0",
     "react-beforeunload": "^2.1.0",
-    "react-dom": "^16.11.0",
-    "react-i18next": "^8.1.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^13.5.0",
     "react-scripts": "^5.0.1",
     "react-search-field": "^1.0.0",
     "react-stepzilla": "^6.0.2",
@@ -32,7 +29,6 @@
     "react-textarea-autosize": "^7.1.2",
     "react-validation-mixin": "^5.4.0",
     "satoshi-bitcoin": "^1.0.5",
-    "stream-browserify": "^3.0.0",
     "syscoinjs-lib": "^1.0.267",
     "web3": "^1.7.5"
   },
@@ -43,7 +39,10 @@
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
-    "extends": "react-app"
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
   },
   "browserslist": [
     ">0.2%",
@@ -54,6 +53,7 @@
   "devDependencies": {
     "gulp": "^4.0.2",
     "gulp-sass": "^5.0.0",
+    "node-polyfill-webpack-plugin": "^4.1.0",
     "sass": "^1.38.2"
   }
 }
